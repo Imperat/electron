@@ -10,7 +10,7 @@ In Electron, for the APIs that take images, you can pass either file paths or
 For example, when creating a tray or setting a window's icon, you can pass an
 image file path as a `string`:
 
-```javascript
+```js
 const { BrowserWindow, Tray } = require('electron')
 
 const appIcon = new Tray('/Users/somebody/images/icon.png')
@@ -20,7 +20,7 @@ console.log(appIcon, win)
 
 Or read the image from the clipboard, which returns a `NativeImage`:
 
-```javascript
+```js
 const { clipboard, Tray } = require('electron')
 const image = clipboard.readImage()
 const appIcon = new Tray(image)
@@ -71,7 +71,7 @@ images/
 └── icon@3x.png
 ```
 
-```javascript
+```js
 const { Tray } = require('electron')
 const appIcon = new Tray('/Users/somebody/images/icon.png')
 console.log(appIcon)
@@ -138,7 +138,7 @@ Creates a new `NativeImage` instance from a file located at `path`. This method
 returns an empty image if the `path` does not exist, cannot be read, or is not
 a valid image.
 
-```javascript
+```js
 const nativeImage = require('electron').nativeImage
 
 const image = nativeImage.createFromPath('/Users/somebody/images/icon.png')
@@ -306,7 +306,7 @@ Returns `NativeImage` - The cropped image.
   * `width` Integer (optional) - Defaults to the image's width.
   * `height` Integer (optional) - Defaults to the image's height.
   * `quality` string (optional) - The desired quality of the resize image.
-    Possible values are `good`, `better`, or `best`. The default is `best`.
+    Possible values include `good`, `better`, or `best`. The default is `best`.
     These values express a desired quality/speed tradeoff. They are translated
     into an algorithm-specific method that depends on the capabilities
     (CPU, GPU) of the underlying platform. It is possible for all three methods

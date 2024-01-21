@@ -6,6 +6,7 @@
 #define ELECTRON_SHELL_BROWSER_BROWSER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,7 +109,7 @@ class Browser : public WindowListObserver {
 #endif
 
   // Set/Get the badge count.
-  bool SetBadgeCount(absl::optional<int> count);
+  bool SetBadgeCount(std::optional<int> count);
   int GetBadgeCount();
 
 #if BUILDFLAG(IS_WIN)
@@ -135,7 +136,11 @@ class Browser : public WindowListObserver {
     std::u16string path;
     std::vector<std::u16string> args;
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_MAC)
+    std::string type = "mainAppService";
+    std::string service_name;
+    std::string status;
+#elif BUILDFLAG(IS_WIN)
     // used in browser::setLoginItemSettings
     bool enabled = true;
     std::wstring name;
@@ -205,9 +210,9 @@ class Browser : public WindowListObserver {
   void ApplyForcedRTL();
 
   // Bounce the dock icon.
-  enum class BounceType {
-    kCritical = 0,        // NSCriticalRequest
-    kInformational = 10,  // NSInformationalRequest
+  enum class BounceType{
+      kCritical = 0,        // NSCriticalRequest
+      kInformational = 10,  // NSInformationalRequest
   };
   int DockBounce(BounceType type);
   void DockCancelBounce(int request_id);
@@ -370,7 +375,7 @@ class Browser : public WindowListObserver {
 
 #if BUILDFLAG(IS_WIN)
   void UpdateBadgeContents(HWND hwnd,
-                           const absl::optional<std::string>& badge_content,
+                           const std::optional<std::string>& badge_content,
                            const std::string& badge_alt_string);
 
   // In charge of running taskbar related APIs.

@@ -7,24 +7,25 @@ Instead of disabling the tests, flag them as flaky so they still run
 but don't cause CI failures on flakes.
 
 diff --git a/test/parallel/parallel.status b/test/parallel/parallel.status
-index 1cbcefb9712fae45b9a0ec7ed361bfe4ec7790be..6a6b52e9ae4150e7215e3587d8ddb41ce4374780 100644
+index 4c29730e78a07f5fa247900ae1bfbc9cb3bfdd0a..d19fb4a1f0e6a1efaff05e8faf638cff7e0c2255 100644
 --- a/test/parallel/parallel.status
 +++ b/test/parallel/parallel.status
-@@ -5,6 +5,12 @@ prefix parallel
- # sample-test                        : PASS,FLAKY
- 
- [true] # This section applies to all platforms
+@@ -8,6 +8,13 @@ prefix parallel
+ # https://github.com/nodejs/node/pull/50327
+ # Currently there's no reliable way to test it.
+ test-diagnostics-channel-memory-leak: SKIP
 +test-inspector-multisession-ws: PASS, FLAKY
 +test-heapsnapshot-near-heap-limit-by-api-in-worker: PASS, FLAKY
 +test-heapsnapshot-near-heap-limit-worker: PASS, FLAKY
 +test-fetch: PASS, FLAKY
 +test-cluster-bind-privileged-port: PASS, FLAKY
 +test-cluster-shared-handle-bind-privileged-port: PASS, FLAKY
++test-debugger-random-port-with-inspect-port: PASS, FLAKY
  
  [$system==win32]
- # https://github.com/nodejs/node/issues/24497
+ # https://github.com/nodejs/node/issues/41206
 diff --git a/test/sequential/sequential.status b/test/sequential/sequential.status
-index 5d88747b7066ce795b091eaaec2a5653f42b2c26..c40cb8827c3e1b91f46147cead5a91a7520019b9 100644
+index a5e2d38ff31aa8b90f3b99783b16cec086b4f30e..b8afe3d88b5af4756663f45fad81105e9b7f0e7e 100644
 --- a/test/sequential/sequential.status
 +++ b/test/sequential/sequential.status
 @@ -7,6 +7,18 @@ prefix sequential

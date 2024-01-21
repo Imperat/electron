@@ -64,6 +64,7 @@
 #include "extensions/browser/extension_pref_store.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/extension_api.h"
 #include "shell/browser/extensions/electron_browser_context_keyed_service_factories.h"
@@ -268,9 +269,6 @@ ElectronBrowserContext::~ElectronBrowserContext() {
   BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(
       this);
   ShutdownStoragePartitions();
-
-  BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
-                            std::move(resource_context_));
 }
 
 void ElectronBrowserContext::InitPrefs() {
@@ -313,6 +311,7 @@ void ElectronBrowserContext::InitPrefs() {
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   if (!in_memory_)
     extensions::ExtensionPrefs::RegisterProfilePrefs(registry.get());
+  extensions::PermissionsManager::RegisterProfilePrefs(registry.get());
 #endif
 
 #if BUILDFLAG(ENABLE_BUILTIN_SPELLCHECKER)
@@ -361,12 +360,6 @@ bool ElectronBrowserContext::CanUseHttpCache() const {
 
 int ElectronBrowserContext::GetMaxCacheSize() const {
   return max_cache_size_;
-}
-
-content::ResourceContext* ElectronBrowserContext::GetResourceContext() {
-  if (!resource_context_)
-    resource_context_ = std::make_unique<content::ResourceContext>();
-  return resource_context_.get();
 }
 
 std::string ElectronBrowserContext::GetMediaDeviceIDSalt() {
@@ -445,7 +438,7 @@ ElectronBrowserContext::GetURLLoaderFactory() {
       ->WillCreateURLLoaderFactory(
           this, nullptr, -1,
           content::ContentBrowserClient::URLLoaderFactoryType::kNavigation,
-          url::Origin(), absl::nullopt, ukm::kInvalidSourceIdObj,
+          url::Origin(), std::nullopt, ukm::kInvalidSourceIdObj,
           &factory_receiver, &header_client, nullptr, nullptr, nullptr,
           nullptr);
 
@@ -580,7 +573,7 @@ void ElectronBrowserContext::DisplayMediaDeviceChosen(
       blink::MediaStreamDevice video_device(request.video_type, id, name);
       video_device.display_media_info = DesktopMediaIDToDisplayMediaInformation(
           nullptr, url::Origin::Create(request.security_origin),
-          content::DesktopMediaID::Parse(request.requested_video_device_id));
+          content::DesktopMediaID::Parse(video_device.id));
       devices.video_device = video_device;
     } else if (result_dict.Get("video", &rfh)) {
       auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
@@ -592,7 +585,7 @@ void ElectronBrowserContext::DisplayMediaDeviceChosen(
           base::UTF16ToUTF8(web_contents->GetTitle()));
       video_device.display_media_info = DesktopMediaIDToDisplayMediaInformation(
           web_contents, url::Origin::Create(request.security_origin),
-          content::DesktopMediaID::Parse(request.requested_video_device_id));
+          content::DesktopMediaID::Parse(video_device.id));
       devices.video_device = video_device;
     } else {
       gin_helper::ErrorThrower(args->isolate())

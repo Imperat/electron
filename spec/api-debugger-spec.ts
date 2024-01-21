@@ -29,16 +29,12 @@ describe('debugger module', () => {
       expect(w.webContents.debugger.isAttached()).to.be.true();
     });
 
-    it('fails when protocol version is not supported', done => {
-      try {
-        w.webContents.debugger.attach('2.0');
-      } catch (err) {
-        expect(w.webContents.debugger.isAttached()).to.be.false();
-        done();
-      }
+    it('fails when protocol version is not supported', () => {
+      expect(() => w.webContents.debugger.attach('2.0')).to.throw();
+      expect(w.webContents.debugger.isAttached()).to.be.false();
     });
 
-    it('attaches when no protocol version is specified', async () => {
+    it('attaches when no protocol version is specified', () => {
       w.webContents.debugger.attach();
       expect(w.webContents.debugger.isAttached()).to.be.true();
     });
@@ -64,7 +60,7 @@ describe('debugger module', () => {
       });
       await detach;
       expect(w.webContents.debugger.isAttached()).to.be.false();
-      expect((w as any).devToolsWebContents.isDestroyed()).to.be.false();
+      expect(w.devToolsWebContents.isDestroyed()).to.be.false();
     });
   });
 
@@ -111,7 +107,7 @@ describe('debugger module', () => {
     it('fires message event', async () => {
       const url = process.platform !== 'win32'
         ? `file://${path.join(fixtures, 'pages', 'a.html')}`
-        : `file:///${path.join(fixtures, 'pages', 'a.html').replace(/\\/g, '/')}`;
+        : `file:///${path.join(fixtures, 'pages', 'a.html').replaceAll('\\', '/')}`;
       w.webContents.loadURL(url);
       w.webContents.debugger.attach();
       const message = emittedUntil(w.webContents.debugger, 'message',
@@ -119,9 +115,9 @@ describe('debugger module', () => {
       w.webContents.debugger.sendCommand('Console.enable');
       const [,, params] = await message;
       w.webContents.debugger.detach();
-      expect((params as any).message.level).to.equal('log');
-      expect((params as any).message.url).to.equal(url);
-      expect((params as any).message.text).to.equal('a');
+      expect(params.message.level).to.equal('log');
+      expect(params.message.url).to.equal(url);
+      expect(params.message.text).to.equal('a');
     });
 
     it('returns error message when command fails', async () => {

@@ -5,7 +5,9 @@
 #include "shell/browser/api/electron_api_app.h"
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include "base/path_service.h"
 #include "base/system/sys_info.h"
 #include "base/values.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/common/chrome_features.h"
@@ -74,7 +77,6 @@
 #include "shell/common/platform_util.h"
 #include "shell/common/thread_restrictions.h"
 #include "shell/common/v8_value_serializer.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/image/image.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -84,6 +86,7 @@
 
 #if BUILDFLAG(IS_MAC)
 #include <CoreFoundation/CoreFoundation.h>
+#include "base/mac/mac_util.h"
 #include "shell/browser/ui/cocoa/electron_bundle_mover.h"
 #endif
 
@@ -155,7 +158,7 @@ struct Converter<JumpListItem::Type> {
 
  private:
   static constexpr auto Lookup =
-      base::MakeFixedFlatMapSorted<base::StringPiece, JumpListItem::Type>({
+      base::MakeFixedFlatMap<std::string_view, JumpListItem::Type>({
           {"file", JumpListItem::Type::kFile},
           {"separator", JumpListItem::Type::kSeparator},
           {"task", JumpListItem::Type::kTask},
@@ -202,7 +205,7 @@ struct Converter<JumpListItem> {
 
   static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
                                    const JumpListItem& val) {
-    gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+    auto dict = gin_helper::Dictionary::CreateEmpty(isolate);
     dict.Set("type", val.type);
 
     switch (val.type) {
@@ -246,7 +249,7 @@ struct Converter<JumpListCategory::Type> {
 
  private:
   static constexpr auto Lookup =
-      base::MakeFixedFlatMapSorted<base::StringPiece, JumpListCategory::Type>({
+      base::MakeFixedFlatMap<std::string_view, JumpListCategory::Type>({
           {"custom", JumpListCategory::Type::kCustom},
           {"frequent", JumpListCategory::Type::kFrequent},
           {"recent", JumpListCategory::Type::kRecent},
@@ -338,7 +341,7 @@ struct Converter<Browser::LaunchItem> {
 
   static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
                                    Browser::LaunchItem val) {
-    gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+    auto dict = gin_helper::Dictionary::CreateEmpty(isolate);
     dict.Set("name", val.name);
     dict.Set("path", val.path);
     dict.Set("args", val.args);
@@ -363,25 +366,31 @@ struct Converter<Browser::LoginItemSettings> {
     dict.Get("path", &(out->path));
     dict.Get("args", &(out->args));
 #if BUILDFLAG(IS_WIN)
-    dict.Get("enabled", &(out->enabled));
     dict.Get("name", &(out->name));
+    dict.Get("enabled", &(out->enabled));
+#elif BUILDFLAG(IS_MAC)
+    dict.Get("serviceName", &(out->service_name));
+    dict.Get("type", &(out->type));
 #endif
     return true;
   }
 
   static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
                                    Browser::LoginItemSettings val) {
-    gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+    auto dict = gin_helper::Dictionary::CreateEmpty(isolate);
+#if BUILDFLAG(IS_WIN)
+    dict.Set("launchItems", val.launch_items);
+    dict.Set("executableWillLaunchAtLogin",
+             val.executable_will_launch_at_login);
+#elif BUILDFLAG(IS_MAC)
+    if (base::mac::MacOSMajorVersion() >= 13)
+      dict.Set("status", val.status);
+#endif
     dict.Set("openAtLogin", val.open_at_login);
     dict.Set("openAsHidden", val.open_as_hidden);
     dict.Set("restoreState", val.restore_state);
     dict.Set("wasOpenedAtLogin", val.opened_at_login);
     dict.Set("wasOpenedAsHidden", val.opened_as_hidden);
-#if BUILDFLAG(IS_WIN)
-    dict.Set("launchItems", val.launch_items);
-    dict.Set("executableWillLaunchAtLogin",
-             val.executable_will_launch_at_login);
-#endif
     return dict.GetHandle();
   }
 };
@@ -406,7 +415,7 @@ struct Converter<net::SecureDnsMode> {
                      v8::Local<v8::Value> val,
                      net::SecureDnsMode* out) {
     static constexpr auto Lookup =
-        base::MakeFixedFlatMapSorted<base::StringPiece, net::SecureDnsMode>({
+        base::MakeFixedFlatMap<std::string_view, net::SecureDnsMode>({
             {"automatic", net::SecureDnsMode::kAutomatic},
             {"off", net::SecureDnsMode::kOff},
             {"secure", net::SecureDnsMode::kSecure},
@@ -432,9 +441,9 @@ IconLoader::IconSize GetIconSizeByString(const std::string& size) {
 }
 
 // Return the path constant from string.
-constexpr int GetPathConstant(base::StringPiece name) {
+int GetPathConstant(std::string_view name) {
   // clang-format off
-  constexpr auto Lookup = base::MakeFixedFlatMapSorted<base::StringPiece, int>({
+  constexpr auto Lookup = base::MakeFixedFlatMap<std::string_view, int>({
       {"appData", DIR_APP_DATA},
 #if BUILDFLAG(IS_POSIX)
       {"cache", base::DIR_CACHE},
@@ -486,7 +495,7 @@ bool NotificationCallbackWrapper(
                           base::BindOnce(base::IgnoreResult(callback), cmd, cwd,
                                          std::move(additional_data)));
   }
-  // ProcessSingleton needs to know whether current process is quiting.
+  // ProcessSingleton needs to know whether current process is quitting.
   return !Browser::Get()->is_shutting_down();
 }
 
@@ -793,6 +802,7 @@ void App::AllowCertificateError(
 }
 
 base::OnceClosure App::SelectClientCertificate(
+    content::BrowserContext* browser_context,
     content::WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
     net::ClientCertIdentityList identities,
@@ -831,10 +841,6 @@ base::OnceClosure App::SelectClientCertificate(
 
 void App::OnGpuInfoUpdate() {
   Emit("gpu-info-update");
-}
-
-void App::OnGpuProcessCrashed() {
-  Emit("gpu-process-crashed", true);
 }
 
 void App::BrowserChildProcessLaunchedAndConnected(
@@ -922,7 +928,7 @@ void App::SetAppPath(const base::FilePath& app_path) {
 
 #if !BUILDFLAG(IS_MAC)
 void App::SetAppLogsPath(gin_helper::ErrorThrower thrower,
-                         absl::optional<base::FilePath> custom_path) {
+                         std::optional<base::FilePath> custom_path) {
   if (custom_path.has_value()) {
     if (!custom_path->IsAbsolute()) {
       thrower.ThrowError("Path must be absolute");
@@ -1262,7 +1268,7 @@ v8::Local<v8::Value> App::GetJumpListSettings() {
   }
 
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
-  gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+  auto dict = gin_helper::Dictionary::CreateEmpty(isolate);
   dict.Set("minItems", min_items);
   dict.Set("removedItems", gin::ConvertToV8(isolate, removed_items));
   return dict.GetHandle();
@@ -1343,11 +1349,9 @@ std::vector<gin_helper::Dictionary> App::GetAppMetrics(v8::Isolate* isolate) {
   int processor_count = base::SysInfo::NumberOfProcessors();
 
   for (const auto& process_metric : app_metrics_) {
-    gin_helper::Dictionary pid_dict = gin::Dictionary::CreateEmpty(isolate);
-    gin_helper::Dictionary cpu_dict = gin::Dictionary::CreateEmpty(isolate);
+    auto pid_dict = gin_helper::Dictionary::CreateEmpty(isolate);
+    auto cpu_dict = gin_helper::Dictionary::CreateEmpty(isolate);
 
-    pid_dict.SetHidden("simple", true);
-    cpu_dict.SetHidden("simple", true);
     cpu_dict.Set(
         "percentCPUUsage",
         process_metric.second->metrics->GetPlatformIndependentCPUUsage() /
@@ -1367,8 +1371,8 @@ std::vector<gin_helper::Dictionary> App::GetAppMetrics(v8::Isolate* isolate) {
     pid_dict.Set("pid", process_metric.second->process.Pid());
     pid_dict.Set("type", content::GetProcessTypeNameInEnglish(
                              process_metric.second->type));
-    pid_dict.Set("creationTime",
-                 process_metric.second->process.CreationTime().ToJsTime());
+    pid_dict.Set("creationTime", process_metric.second->process.CreationTime()
+                                     .InMillisecondsFSinceUnixEpoch());
 
     if (!process_metric.second->service_name.empty()) {
       pid_dict.Set("serviceName", process_metric.second->service_name);
@@ -1381,8 +1385,7 @@ std::vector<gin_helper::Dictionary> App::GetAppMetrics(v8::Isolate* isolate) {
 #if !BUILDFLAG(IS_LINUX)
     auto memory_info = process_metric.second->GetMemoryInfo();
 
-    gin_helper::Dictionary memory_dict = gin::Dictionary::CreateEmpty(isolate);
-    memory_dict.SetHidden("simple", true);
+    auto memory_dict = gin_helper::Dictionary::CreateEmpty(isolate);
     memory_dict.Set("workingSetSize",
                     static_cast<double>(memory_info.working_set_size >> 10));
     memory_dict.Set(
@@ -1477,23 +1480,8 @@ void App::SetUserAgentFallback(const std::string& user_agent) {
 }
 
 #if BUILDFLAG(IS_WIN)
-
 bool App::IsRunningUnderARM64Translation() const {
-  USHORT processMachine = 0;
-  USHORT nativeMachine = 0;
-
-  auto IsWow64Process2 = reinterpret_cast<decltype(&::IsWow64Process2)>(
-      GetProcAddress(GetModuleHandle(L"kernel32.dll"), "IsWow64Process2"));
-
-  if (IsWow64Process2 == nullptr) {
-    return false;
-  }
-
-  if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
-    return false;
-  }
-
-  return nativeMachine == IMAGE_FILE_MACHINE_ARM64;
+  return base::win::OSInfo::IsRunningEmulatedOnArm64();
 }
 #endif
 
@@ -1533,7 +1521,7 @@ v8::Local<v8::Value> App::GetDockAPI(v8::Isolate* isolate) {
     // Initialize the Dock API, the methods are bound to "dock" which exists
     // for the lifetime of "app"
     auto browser = base::Unretained(Browser::Get());
-    gin_helper::Dictionary dock_obj = gin::Dictionary::CreateEmpty(isolate);
+    auto dock_obj = gin_helper::Dictionary::CreateEmpty(isolate);
     dock_obj.SetMethod("bounce", &DockBounce);
     dock_obj.SetMethod(
         "cancelBounce",
@@ -1617,7 +1605,7 @@ void ConfigureHostResolver(v8::Isolate* isolate,
     // doh_config.
     std::vector<net::DnsOverHttpsServerConfig> servers;
     for (const std::string& server_template : secure_dns_server_strings) {
-      absl::optional<net::DnsOverHttpsServerConfig> server_config =
+      std::optional<net::DnsOverHttpsServerConfig> server_config =
           net::DnsOverHttpsServerConfig::FromString(server_template);
       if (!server_config.has_value()) {
         thrower.ThrowTypeError(std::string("not a valid DoH template: ") +
@@ -1783,8 +1771,6 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
 #endif
 #if BUILDFLAG(IS_MAC)
       .SetProperty("dock", &App::GetDockAPI)
-      .SetProperty("runningUnderRosettaTranslation",
-                   &App::IsRunningUnderRosettaTranslation)
 #endif
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
       .SetProperty("runningUnderARM64Translation",

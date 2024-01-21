@@ -1,12 +1,9 @@
 import { expect } from 'chai';
-import { nativeTheme, systemPreferences, BrowserWindow, ipcMain } from 'electron/main';
+import { nativeTheme, BrowserWindow, ipcMain } from 'electron/main';
 import { once } from 'node:events';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import * as semver from 'semver';
 import { setTimeout } from 'node:timers/promises';
 
-import { ifdescribe } from './lib/spec-helpers';
 import { closeAllWindows } from './lib/window-helpers';
 
 describe('nativeTheme module', () => {
@@ -58,15 +55,6 @@ describe('nativeTheme module', () => {
       // Wait a few ticks to allow an async events to flush
       await setTimeout(20);
       expect(called).to.equal(false);
-    });
-
-    ifdescribe(process.platform === 'darwin' && semver.gte(os.release(), '18.0.0'))('on macOS 10.14', () => {
-      it('should update appLevelAppearance when set', () => {
-        nativeTheme.themeSource = 'dark';
-        expect(systemPreferences.appLevelAppearance).to.equal('dark');
-        nativeTheme.themeSource = 'light';
-        expect(systemPreferences.appLevelAppearance).to.equal('light');
-      });
     });
 
     const getPrefersColorSchemeIsDark = async (w: Electron.BrowserWindow) => {

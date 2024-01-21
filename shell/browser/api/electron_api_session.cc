@@ -281,7 +281,7 @@ void DownloadIdCallback(content::DownloadManager* download_manager,
       url_chain, GURL(),
       content::StoragePartitionConfig::CreateDefault(
           download_manager->GetBrowserContext()),
-      GURL(), GURL(), absl::nullopt, mime_type, mime_type, start_time,
+      GURL(), GURL(), std::nullopt, mime_type, mime_type, start_time,
       base::Time(), etag, last_modified, offset, length, std::string(),
       download::DownloadItem::INTERRUPTED,
       download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
@@ -432,7 +432,7 @@ v8::Local<v8::Promise> Session::ResolveProxy(gin::Arguments* args) {
 
 v8::Local<v8::Promise> Session::ResolveHost(
     std::string host,
-    absl::optional<network::mojom::ResolveHostParametersPtr> params) {
+    std::optional<network::mojom::ResolveHostParametersPtr> params) {
   gin_helper::Promise<gin_helper::Dictionary> promise(isolate_);
   v8::Local<v8::Promise> handle = promise.GetHandle();
 
@@ -441,15 +441,15 @@ v8::Local<v8::Promise> Session::ResolveHost(
       params ? std::move(params.value()) : nullptr,
       base::BindOnce(
           [](gin_helper::Promise<gin_helper::Dictionary> promise,
-             int64_t net_error, const absl::optional<net::AddressList>& addrs) {
+             int64_t net_error, const std::optional<net::AddressList>& addrs) {
             if (net_error < 0) {
               promise.RejectWithErrorMessage(net::ErrorToString(net_error));
             } else {
               DCHECK(addrs.has_value() && !addrs->empty());
 
               v8::HandleScope handle_scope(promise.isolate());
-              gin_helper::Dictionary dict =
-                  gin::Dictionary::CreateEmpty(promise.isolate());
+              auto dict =
+                  gin_helper::Dictionary::CreateEmpty(promise.isolate());
               dict.Set("endpoints", addrs->endpoints());
               promise.Resolve(dict);
             }
@@ -747,6 +747,7 @@ v8::Local<v8::Promise> Session::ClearAuthCache() {
       ->GetNetworkContext()
       ->ClearHttpAuthCache(
           base::Time(), base::Time::Max(),
+          nullptr /*mojom::ClearDataFilterPtr*/,
           base::BindOnce(gin_helper::Promise<void>::ResolvePromise,
                          std::move(promise)));
 
@@ -827,7 +828,7 @@ void Session::DownloadURL(const GURL& url, gin::Arguments* args) {
 
 void Session::CreateInterruptedDownload(const gin_helper::Dictionary& options) {
   int64_t offset = 0, length = 0;
-  double start_time = base::Time::Now().ToDoubleT();
+  double start_time = base::Time::Now().InSecondsFSinceUnixEpoch();
   std::string mime_type, last_modified, etag;
   base::FilePath path;
   std::vector<GURL> url_chain;
@@ -852,7 +853,8 @@ void Session::CreateInterruptedDownload(const gin_helper::Dictionary& options) {
   auto* download_manager = browser_context()->GetDownloadManager();
   download_manager->GetNextId(base::BindRepeating(
       &DownloadIdCallback, download_manager, path, url_chain, mime_type, offset,
-      length, last_modified, etag, base::Time::FromDoubleT(start_time)));
+      length, last_modified, etag,
+      base::Time::FromSecondsSinceUnixEpoch(start_time)));
 }
 
 void Session::SetPreloads(const std::vector<base::FilePath>& preloads) {
@@ -1269,7 +1271,7 @@ gin::Handle<Session> Session::FromPartition(v8::Isolate* isolate,
 }
 
 // static
-absl::optional<gin::Handle<Session>> Session::FromPath(
+std::optional<gin::Handle<Session>> Session::FromPath(
     v8::Isolate* isolate,
     const base::FilePath& path,
     base::Value::Dict options) {
@@ -1278,12 +1280,12 @@ absl::optional<gin::Handle<Session>> Session::FromPath(
   if (path.empty()) {
     gin_helper::Promise<v8::Local<v8::Value>> promise(isolate);
     promise.RejectWithErrorMessage("An empty path was specified");
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (!path.IsAbsolute()) {
     gin_helper::Promise<v8::Local<v8::Value>> promise(isolate);
     promise.RejectWithErrorMessage("An absolute path was not provided");
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   browser_context =
@@ -1301,7 +1303,7 @@ gin::Handle<Session> Session::New() {
 
 void Session::FillObjectTemplate(v8::Isolate* isolate,
                                  v8::Local<v8::ObjectTemplate> templ) {
-  gin::ObjectTemplateBuilder(isolate, "Session", templ)
+  gin::ObjectTemplateBuilder(isolate, GetClassName(), templ)
       .SetMethod("resolveHost", &Session::ResolveHost)
       .SetMethod("resolveProxy", &Session::ResolveProxy)
       .SetMethod("getCacheSize", &Session::GetCacheSize)
@@ -1379,7 +1381,7 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
 }
 
 const char* Session::GetTypeName() {
-  return "Session";
+  return GetClassName();
 }
 
 }  // namespace electron::api
@@ -1408,7 +1410,7 @@ v8::Local<v8::Value> FromPath(const base::FilePath& path,
   }
   base::Value::Dict options;
   args->GetNext(&options);
-  absl::optional<gin::Handle<Session>> session_handle =
+  std::optional<gin::Handle<Session>> session_handle =
       Session::FromPath(args->isolate(), path, std::move(options));
 
   if (session_handle)

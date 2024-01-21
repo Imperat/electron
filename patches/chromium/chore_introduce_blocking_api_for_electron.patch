@@ -7,18 +7,18 @@ This patch comes after Chromium removed the ScopedAllowIO API in favor
 of explicitly adding ScopedAllowBlocking calls as friends.
 
 diff --git a/base/threading/thread_restrictions.h b/base/threading/thread_restrictions.h
-index 385b540b5a4291070eff5e1e6a407223de097cdb..32fec685bc3b6631594ca3ee5922c5f49da83e45 100644
+index 53775a0aa1350ee433e3b23530fb0e246e575d2f..4e056adb25e0a32bc85fb16debe7844966d51f10 100644
 --- a/base/threading/thread_restrictions.h
 +++ b/base/threading/thread_restrictions.h
-@@ -133,6 +133,7 @@ class FirefoxProfileLock;
- class KeyStorageLinux;
+@@ -135,6 +135,7 @@ class KeyStorageLinux;
  class NativeBackendKWallet;
  class NativeDesktopMediaList;
+ class PartnerBookmarksReader;
 +class ProcessSingleton;
  class Profile;
  class ProfileImpl;
- class StartupTabProviderImpl;
-@@ -272,6 +273,9 @@ class BackendImpl;
+ class ScopedAllowBlockingForProfile;
+@@ -273,6 +274,9 @@ class BackendImpl;
  class InFlightIO;
  bool CleanupDirectorySync(const base::FilePath&);
  }  // namespace disk_cache
@@ -28,7 +28,7 @@ index 385b540b5a4291070eff5e1e6a407223de097cdb..32fec685bc3b6631594ca3ee5922c5f4
  namespace enterprise_connectors {
  class LinuxKeyRotationCommand;
  }  // namespace enterprise_connectors
-@@ -582,6 +586,7 @@ class BASE_EXPORT [[maybe_unused, nodiscard]] ScopedAllowBlocking {
+@@ -564,6 +568,7 @@ class BASE_EXPORT [[maybe_unused, nodiscard]] ScopedAllowBlocking {
    friend class ::DesktopNotificationBalloon;
    friend class ::FirefoxProfileLock;
    friend class ::GaiaConfig;
@@ -36,7 +36,7 @@ index 385b540b5a4291070eff5e1e6a407223de097cdb..32fec685bc3b6631594ca3ee5922c5f4
    friend class ::ProfileImpl;
    friend class ::ScopedAllowBlockingForProfile;
    friend class ::StartupTabProviderImpl;
-@@ -619,6 +624,7 @@ class BASE_EXPORT [[maybe_unused, nodiscard]] ScopedAllowBlocking {
+@@ -602,6 +607,7 @@ class BASE_EXPORT [[maybe_unused, nodiscard]] ScopedAllowBlocking {
    friend class crosapi::LacrosThreadTypeDelegate;
    friend class crypto::ScopedAllowBlockingForNSS;  // http://crbug.com/59847
    friend class drive::FakeDriveService;

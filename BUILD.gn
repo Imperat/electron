@@ -9,6 +9,7 @@ import("//pdf/features.gni")
 import("//ppapi/buildflags/buildflags.gni")
 import("//printing/buildflags/buildflags.gni")
 import("//testing/test.gni")
+import("//third_party/electron_node/electron_node.gni")
 import("//third_party/ffmpeg/ffmpeg_options.gni")
 import("//tools/generate_library_loader/generate_library_loader.gni")
 import("//tools/grit/grit_rule.gni")
@@ -28,6 +29,7 @@ import("filenames.gni")
 import("filenames.hunspell.gni")
 import("filenames.libcxx.gni")
 import("filenames.libcxxabi.gni")
+import("js2c_toolchain.gni")
 
 if (is_mac) {
   import("//build/config/mac/rules.gni")
@@ -37,7 +39,7 @@ if (is_mac) {
   import("build/rules.gni")
 
   assert(
-      mac_deployment_target == "10.13",
+      mac_deployment_target == "10.15",
       "Chromium has updated the mac_deployment_target, please update this assert, update the supported versions documentation (docs/tutorial/support.md) and flag this as a breaking change")
 }
 
@@ -103,14 +105,26 @@ branding = read_file("shell/app/BRANDING.json", "json")
 electron_project_name = branding.project_name
 electron_product_name = branding.product_name
 electron_mac_bundle_id = branding.mac_bundle_id
-electron_version = exec_script("script/print-version.py",
-                               [],
-                               "trim string",
-                               [
-                                 ".git/packed-refs",
-                                 ".git/HEAD",
-                                 "script/lib/get-version.js",
-                               ])
+
+if (override_electron_version != "") {
+  electron_version = override_electron_version
+} else {
+  # When building from source code tarball there is no git tag available and
+  # builders must explicitly pass override_electron_version in gn args.
+  # This read_file call will assert if there is no git information, without it
+  # gn will generate a malformed build configuration and ninja will get into
+  # infinite loop.
+  read_file(".git/packed-refs", "string")
+
+  # Set electron version from git tag.
+  electron_version = exec_script("script/get-git-version.py",
+                                 [],
+                                 "trim string",
+                                 [
+                                   ".git/packed-refs",
+                                   ".git/HEAD",
+                                 ])
+}
 
 if (is_mas_build) {
   assert(is_mac,
@@ -224,6 +238,7 @@ action("electron_js2c") {
     ":electron_sandboxed_renderer_bundle",
     ":electron_utility_bundle",
     ":electron_worker_bundle",
+    "//third_party/electron_node:node_js2c($electron_js2c_toolchain)",
   ]
 
   sources = [
@@ -236,13 +251,17 @@ action("electron_js2c") {
     "$target_gen_dir/js2c/worker_init.js",
   ]
 
-  inputs = sources + [ "//third_party/electron_node/tools/js2c.py" ]
+  inputs = sources
   outputs = [ "$root_gen_dir/electron_natives.cc" ]
 
   script = "build/js2c.py"
-  args = [ rebase_path("//third_party/electron_node") ] +
-         rebase_path(outputs, root_build_dir) +
-         rebase_path(sources, root_build_dir)
+  out_dir =
+      get_label_info(":anything($electron_js2c_toolchain)", "root_out_dir")
+  args = [
+           rebase_path("$out_dir/node_js2c"),
+           rebase_path("$root_gen_dir"),
+         ] + rebase_path(outputs, root_gen_dir) +
+         rebase_path(sources, root_gen_dir)
 }
 
 action("generate_config_gypi") {
@@ -395,8 +414,10 @@ action("electron_generate_node_defines") {
 }
 
 source_set("electron_lib") {
-  configs += [ "//v8:external_startup_data" ]
-  configs += [ "//third_party/electron_node:node_internals" ]
+  configs += [
+    "//v8:external_startup_data",
+    "//third_party/electron_node:node_internals",
+  ]
 
   public_configs = [
     ":branding",
@@ -421,6 +442,7 @@ source_set("electron_lib") {
     "//chrome/app/resources:platform_locale_settings",
     "//components/autofill/core/common:features",
     "//components/certificate_transparency",
+    "//components/compose:buildflags",
     "//components/embedder_support:browser_util",
     "//components/language/core/browser",
     "//components/net_log",
@@ -429,6 +451,8 @@ source_set("electron_lib") {
     "//components/network_hints/renderer",
     "//components/network_session_configurator/common",
     "//components/omnibox/browser:buildflags",
+    "//components/os_crypt/async/browser",
+    "//components/os_crypt/async/browser:key_provider_interface",
     "//components/os_crypt/sync",
     "//components/pref_registry",
     "//components/prefs",
@@ -470,6 +494,7 @@ source_set("electron_lib") {
     "//third_party/webrtc_overrides:webrtc_component",
     "//third_party/widevine/cdm:headers",
     "//third_party/zlib/google:zip",
+    "//ui/base:ozone_buildflags",
     "//ui/base/idle",
     "//ui/compositor",
     "//ui/events:dom_keycode_converter",
@@ -542,7 +567,6 @@ source_set("electron_lib") {
 
   if (is_mac) {
     deps += [
-      ":electron_lib_arc",
       "//components/remote_cocoa/app_shim",
       "//components/remote_cocoa/browser",
       "//content/browser:mac_helpers",
@@ -638,6 +662,7 @@ source_set("electron_lib") {
   }
   if (is_win) {
     libs += [ "dwmapi.lib" ]
+    sources += [ "shell/common/asar/archive_win.cc" ]
     deps += [
       "//components/crash/core/app:crash_export_thunks",
       "//ui/native_theme:native_theme_browser",
@@ -671,13 +696,6 @@ source_set("electron_lib") {
     ]
   }
 
-  if (enable_views_api) {
-    sources += [
-      "shell/browser/api/views/electron_api_image_view.cc",
-      "shell/browser/api/views/electron_api_image_view.h",
-    ]
-  }
-
   if (enable_printing) {
     sources += [
       "shell/browser/printing/print_view_manager_electron.cc",
@@ -701,6 +719,7 @@ source_set("electron_lib") {
       "shell/common/extensions/api",
       "shell/common/extensions/api:extensions_features",
       "//chrome/browser/resources:component_extension_resources",
+      "//components/guest_view/common:mojom",
       "//components/update_client:update_client",
       "//components/zoom",
       "//extensions/browser",
@@ -730,8 +749,8 @@ source_set("electron_lib") {
       "//pdf",
     ]
     sources += [
-      "shell/browser/electron_pdf_web_contents_helper_client.cc",
-      "shell/browser/electron_pdf_web_contents_helper_client.h",
+      "shell/browser/electron_pdf_document_helper_client.cc",
+      "shell/browser/electron_pdf_document_helper_client.h",
       "shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.cc",
       "shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.h",
     ]
@@ -741,27 +760,6 @@ source_set("electron_lib") {
 
   if (allow_runtime_configurable_key_storage) {
     defines += [ "ALLOW_RUNTIME_CONFIGURABLE_KEY_STORAGE" ]
-  }
-}
-
-if (is_mac) {
-  source_set("electron_lib_arc") {
-    include_dirs = [ "." ]
-    sources = [
-      "shell/browser/mac/dict_util.h",
-      "shell/browser/mac/dict_util.mm",
-      "shell/browser/mac/electron_application_delegate.h",
-      "shell/browser/mac/electron_application_delegate.mm",
-    ]
-
-    deps = [
-      "//base",
-      "//skia",
-      "//third_party/electron_node:node_lib",
-      "//v8",
-    ]
-
-    configs += [ "//build/config/compiler:enable_arc" ]
   }
 }
 
@@ -925,15 +923,12 @@ if (is_mac) {
       assert(defined(invoker.helper_name_suffix))
 
       output_name = electron_helper_name + invoker.helper_name_suffix
-      deps = [
-        ":electron_framework+link",
-        "//base/allocator:early_zone_registration_mac",
-      ]
+      deps = [ ":electron_framework+link" ]
       if (!is_mas_build) {
         deps += [ "//sandbox/mac:seatbelt" ]
       }
       defines = [ "HELPER_EXECUTABLE" ]
-      extra_configs = [ "//electron/build/config:mas_build" ]
+      configs += [ "//electron/build/config:mas_build" ]
       sources = [
         "shell/app/electron_main_mac.cc",
         "shell/app/uv_stdio_fix.cc",
@@ -1089,7 +1084,6 @@ if (is_mac) {
       ":electron_app_plist",
       ":electron_app_resources",
       ":electron_fuses",
-      "//base/allocator:early_zone_registration_mac",
       "//electron/buildflags",
     ]
     if (is_mas_build) {
@@ -1104,7 +1098,7 @@ if (is_mac) {
       "-rpath",
       "@executable_path/../Frameworks",
     ]
-    extra_configs = [ "//electron/build/config:mas_build" ]
+    configs += [ "//electron/build/config:mas_build" ]
   }
 
   if (enable_dsyms) {
@@ -1341,25 +1335,6 @@ if (is_mac) {
   }
 }
 
-test("shell_browser_ui_unittests") {
-  sources = [
-    "//electron/shell/browser/ui/accelerator_util_unittests.cc",
-    "//electron/shell/browser/ui/run_all_unittests.cc",
-  ]
-
-  configs += [ ":electron_lib_config" ]
-
-  deps = [
-    ":electron_lib",
-    "//base",
-    "//base/test:test_support",
-    "//testing/gmock",
-    "//testing/gtest",
-    "//ui/base",
-    "//ui/strings",
-  ]
-}
-
 template("dist_zip") {
   _runtime_deps_target = "${target_name}__deps"
   _runtime_deps_file =
@@ -1498,8 +1473,9 @@ dist_zip("libcxx_headers_zip") {
   data_deps = [ ":libcxx_headers" ]
   deps = data_deps
   flatten = true
-  flatten_relative_to = rebase_path(
-          "$target_gen_dir/electron_libcxx_include/buildtools/third_party/libc++/trunk",
+  flatten_relative_to =
+      rebase_path(
+          "$target_gen_dir/electron_libcxx_include/third_party/libc++/src",
           "$root_out_dir")
 
   outputs = [ "$root_build_dir/libcxx_headers.zip" ]
@@ -1515,7 +1491,7 @@ dist_zip("libcxxabi_headers_zip") {
   deps = data_deps
   flatten = true
   flatten_relative_to = rebase_path(
-          "$target_gen_dir/electron_libcxxabi_include/buildtools/third_party/libc++abi/trunk",
+          "$target_gen_dir/electron_libcxxabi_include/third_party/libc++abi/src",
           "$root_out_dir")
 
   outputs = [ "$root_build_dir/libcxxabi_headers.zip" ]
@@ -1530,4 +1506,71 @@ action("libcxx_objects_zip") {
 
 group("electron") {
   public_deps = [ ":electron_app" ]
+}
+
+##### node_headers
+
+node_dir = "../third_party/electron_node"
+node_files = read_file("$node_dir/filenames.json", "json")
+node_headers_dir = "$root_gen_dir/node_headers"
+
+header_group_index = 0
+header_groups = []
+foreach(header_group, node_files.headers) {
+  copy("node_headers_${header_group_index}") {
+    sources = rebase_path(header_group.files, ".", node_dir)
+    outputs =
+        [ "$node_headers_dir/${header_group.dest_dir}/{{source_file_part}}" ]
+  }
+  header_groups += [ ":node_headers_${header_group_index}" ]
+  header_group_index += 1
+}
+
+copy("zlib_headers") {
+  sources = [
+    "$node_dir/deps/zlib/zconf.h",
+    "$node_dir/deps/zlib/zlib.h",
+  ]
+  outputs = [ "$node_headers_dir/include/node/{{source_file_part}}" ]
+}
+
+copy("node_gypi_headers") {
+  deps = [ ":generate_config_gypi" ]
+  sources = [
+    "$node_dir/common.gypi",
+    "$root_gen_dir/config.gypi",
+  ]
+  outputs = [ "$node_headers_dir/include/node/{{source_file_part}}" ]
+}
+
+action("node_version_header") {
+  inputs = [ "$node_dir/src/node_version.h" ]
+  outputs = [ "$node_headers_dir/include/node/node_version.h" ]
+  script = "script/generate_node_version_header.py"
+  args = rebase_path(inputs) + rebase_path(outputs)
+  if (node_module_version != "") {
+    args += [ "$node_module_version" ]
+  }
+}
+
+action("tar_node_headers") {
+  deps = [ ":copy_node_headers" ]
+  outputs = [ "$root_gen_dir/node_headers.tar.gz" ]
+  script = "script/tar.py"
+  args = [
+    rebase_path("$root_gen_dir/node_headers"),
+    rebase_path(outputs[0]),
+  ]
+}
+
+group("copy_node_headers") {
+  public_deps = header_groups + [
+                  ":node_gypi_headers",
+                  ":node_version_header",
+                  ":zlib_headers",
+                ]
+}
+
+group("node_headers") {
+  public_deps = [ ":tar_node_headers" ]
 }

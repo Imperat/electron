@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -46,7 +47,7 @@ struct Converter<blink::mojom::AutoplayPolicy> {
                      blink::mojom::AutoplayPolicy* out) {
     using Val = blink::mojom::AutoplayPolicy;
     static constexpr auto Lookup =
-        base::MakeFixedFlatMapSorted<base::StringPiece, Val>({
+        base::MakeFixedFlatMap<std::string_view, Val>({
             {"document-user-activation-required",
              Val::kDocumentUserActivationRequired},
             {"no-user-gesture-required", Val::kNoUserGestureRequired},
@@ -63,7 +64,7 @@ struct Converter<blink::mojom::V8CacheOptions> {
                      blink::mojom::V8CacheOptions* out) {
     using Val = blink::mojom::V8CacheOptions;
     static constexpr auto Lookup =
-        base::MakeFixedFlatMapSorted<base::StringPiece, Val>({
+        base::MakeFixedFlatMap<std::string_view, Val>({
             {"bypassHeatCheck", Val::kCodeWithoutHeatCheck},
             {"bypassHeatCheckAndEagerCompile", Val::kFullCodeWithoutHeatCheck},
             {"code", Val::kCode},
@@ -119,7 +120,7 @@ void WebContentsPreferences::Clear() {
   node_integration_in_worker_ = false;
   disable_html_fullscreen_window_resize_ = false;
   webview_tag_ = false;
-  sandbox_ = absl::nullopt;
+  sandbox_ = std::nullopt;
   context_isolation_ = true;
   javascript_ = true;
   images_ = true;
@@ -133,24 +134,24 @@ void WebContentsPreferences::Clear() {
   navigate_on_drag_drop_ = false;
   autoplay_policy_ = blink::mojom::AutoplayPolicy::kNoUserGestureRequired;
   default_font_family_.clear();
-  default_font_size_ = absl::nullopt;
-  default_monospace_font_size_ = absl::nullopt;
-  minimum_font_size_ = absl::nullopt;
-  default_encoding_ = absl::nullopt;
+  default_font_size_ = std::nullopt;
+  default_monospace_font_size_ = std::nullopt;
+  minimum_font_size_ = std::nullopt;
+  default_encoding_ = std::nullopt;
   is_webview_ = false;
   custom_args_.clear();
   custom_switches_.clear();
-  enable_blink_features_ = absl::nullopt;
-  disable_blink_features_ = absl::nullopt;
+  enable_blink_features_ = std::nullopt;
+  disable_blink_features_ = std::nullopt;
   disable_popups_ = false;
   disable_dialogs_ = false;
   safe_dialogs_ = false;
-  safe_dialogs_message_ = absl::nullopt;
+  safe_dialogs_message_ = std::nullopt;
   ignore_menu_shortcuts_ = false;
-  background_color_ = absl::nullopt;
+  background_color_ = std::nullopt;
   image_animation_policy_ =
       blink::mojom::ImageAnimationPolicy::kImageAnimationPolicyAllowed;
-  preload_path_ = absl::nullopt;
+  preload_path_ = std::nullopt;
   v8_cache_options_ = blink::mojom::V8CacheOptions::kDefault;
 
 #if BUILDFLAG(IS_MAC)
@@ -234,7 +235,6 @@ void WebContentsPreferences::SetFromDictionary(
     disable_blink_features_ = disable_blink_features;
 
   base::FilePath::StringType preload_path;
-  std::string preload_url_str;
   if (web_preferences.Get(options::kPreloadScript, &preload_path)) {
     base::FilePath preload(preload_path);
     if (preload.IsAbsolute()) {
@@ -392,18 +392,26 @@ void WebContentsPreferences::SaveLastPreferences() {
            allow_running_insecure_content_);
   dict.Set(options::kExperimentalFeatures, experimental_features_);
   dict.Set(options::kEnableBlinkFeatures, enable_blink_features_.value_or(""));
+  dict.Set("disableDialogs", disable_dialogs_);
+  dict.Set("safeDialogs", safe_dialogs_);
+  dict.Set("safeDialogsMessage", safe_dialogs_message_.value_or(""));
 
   last_web_preferences_ = base::Value(std::move(dict));
 }
 
 void WebContentsPreferences::OverrideWebkitPrefs(
-    blink::web_pref::WebPreferences* prefs) {
+    blink::web_pref::WebPreferences* prefs,
+    blink::RendererPreferences* renderer_prefs) {
   prefs->javascript_enabled = javascript_;
   prefs->images_enabled = images_;
   prefs->animation_policy = image_animation_policy_;
   prefs->text_areas_are_resizable = text_areas_are_resizable_;
-  prefs->navigate_on_drag_drop = navigate_on_drag_drop_;
   prefs->autoplay_policy = autoplay_policy_;
+
+  // TODO: navigate_on_drag_drop was removed from web prefs in favor of the
+  // equivalent option in renderer prefs. this option should be deprecated from
+  // our API and then removed here.
+  renderer_prefs->can_accept_load_drops = navigate_on_drag_drop_;
 
   // Check if webgl should be enabled.
   prefs->webgl1_enabled = webgl_;

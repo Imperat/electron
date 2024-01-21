@@ -5,6 +5,7 @@
 #ifndef ELECTRON_SHELL_BROWSER_API_ELECTRON_API_WEB_FRAME_MAIN_H_
 #define ELECTRON_SHELL_BROWSER_API_ELECTRON_API_WEB_FRAME_MAIN_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -52,9 +53,12 @@ class WebFrameMain : public gin::Wrappable<WebFrameMain>,
   static WebFrameMain* FromRenderFrameHost(
       content::RenderFrameHost* render_frame_host);
 
+  // gin_helper::Constructible
+  static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
+  static const char* GetClassName() { return "WebFrameMain"; }
+
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
-  static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
   const char* GetTypeName() override;
 
   content::RenderFrameHost* render_frame_host() const { return render_frame_; }
@@ -100,7 +104,7 @@ class WebFrameMain : public gin::Wrappable<WebFrameMain>,
   void PostMessage(v8::Isolate* isolate,
                    const std::string& channel,
                    v8::Local<v8::Value> message_value,
-                   absl::optional<v8::Local<v8::Value>> transfer);
+                   std::optional<v8::Local<v8::Value>> transfer);
 
   int FrameTreeNodeID() const;
   std::string Name() const;

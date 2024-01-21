@@ -38,11 +38,8 @@ const char kUsbDriverKey[] = "usb_driver";
 std::string EncodeToken(const base::UnguessableToken& token) {
   const uint64_t data[2] = {token.GetHighForSerialization(),
                             token.GetLowForSerialization()};
-  std::string buffer;
-  base::Base64Encode(
-      base::StringPiece(reinterpret_cast<const char*>(&data[0]), sizeof(data)),
-      &buffer);
-  return buffer;
+  return base::Base64Encode(
+      base::StringPiece(reinterpret_cast<const char*>(&data[0]), sizeof(data)));
 }
 
 base::Value PortInfoToValue(const device::mojom::SerialPortInfo& port) {
@@ -158,8 +155,7 @@ void SerialChooserContext::RevokePortPermissionWebInitiated(
   if (session) {
     v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
     v8::HandleScope scope(isolate);
-    gin_helper::Dictionary details =
-        gin_helper::Dictionary::CreateEmpty(isolate);
+    auto details = gin_helper::Dictionary::CreateEmpty(isolate);
     details.Set("port", it->second);
     details.SetGetter("frame", render_frame_host);
     details.Set("origin", origin.Serialize());

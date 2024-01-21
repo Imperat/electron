@@ -184,8 +184,7 @@ void WebFrameMain::Send(v8::Isolate* isolate,
   if (!CheckRenderFrame())
     return;
 
-  GetRendererApi()->Message(internal, channel, std::move(message),
-                            0 /* sender_id */);
+  GetRendererApi()->Message(internal, channel, std::move(message));
 }
 
 const mojo::Remote<mojom::ElectronRenderer>& WebFrameMain::GetRendererApi() {
@@ -230,7 +229,7 @@ void WebFrameMain::OnRendererConnectionError() {
 void WebFrameMain::PostMessage(v8::Isolate* isolate,
                                const std::string& channel,
                                v8::Local<v8::Value> message_value,
-                               absl::optional<v8::Local<v8::Value>> transfer) {
+                               std::optional<v8::Local<v8::Value>> transfer) {
   blink::TransferableMessage transferable_message;
   if (!electron::SerializeV8Value(isolate, message_value,
                                   &transferable_message)) {
@@ -409,7 +408,7 @@ void WebFrameMain::FillObjectTemplate(v8::Isolate* isolate,
 }
 
 const char* WebFrameMain::GetTypeName() {
-  return "WebFrameMain";
+  return GetClassName();
 }
 
 }  // namespace electron::api

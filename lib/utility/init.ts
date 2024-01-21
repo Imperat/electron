@@ -1,5 +1,8 @@
+import { EventEmitter } from 'events';
+import { pathToFileURL } from 'url';
+
 import { ParentPort } from '@electron/internal/utility/parent-port';
-const Module = require('module');
+
 const v8Util = process._linkedBinding('electron_common_v8_util');
 
 const entryScript: string = v8Util.getHiddenValue(process, '_serviceStartupScript');
@@ -12,6 +15,8 @@ require('../common/reset-search-paths');
 
 // Import common settings.
 require('@electron/internal/common/init');
+
+process._linkedBinding('electron_browser_event_emitter').setEventEmitterPrototype(EventEmitter.prototype);
 
 const parentPort: ParentPort = new ParentPort();
 Object.defineProperty(process, 'parentPort', {
@@ -34,5 +39,14 @@ parentPort.on('removeListener', (name: string) => {
 });
 
 // Finally load entry script.
-process._firstFileName = Module._resolveFilename(entryScript, null, false);
-Module._load(entryScript, Module, true);
+const { loadESM } = __non_webpack_require__('internal/process/esm_loader');
+const mainEntry = pathToFileURL(entryScript);
+loadESM(async (esmLoader: any) => {
+  try {
+    await esmLoader.import(mainEntry.toString(), undefined, Object.create(null));
+  } catch (err) {
+    // @ts-ignore internalBinding is a secret internal global that we shouldn't
+    // really be using, so we ignore the type error instead of declaring it in types
+    internalBinding('errors').triggerUncaughtException(err);
+  }
+});

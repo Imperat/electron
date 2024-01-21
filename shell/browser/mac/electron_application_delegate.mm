@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/allocator/buildflags.h"
-#include "base/allocator/partition_allocator/shim/allocator_shim.h"
+#include "base/allocator/partition_allocator/src/partition_alloc/shim/allocator_shim.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
@@ -19,12 +19,8 @@
 
 #import <UserNotifications/UserNotifications.h>
 
-#if !defined(__has_feature) || !__has_feature(objc_arc)
-#error "This file requires ARC support."
-#endif
-
 static NSDictionary* UNNotificationResponseToNSDictionary(
-    UNNotificationResponse* response) API_AVAILABLE(macosx(10.14)) {
+    UNNotificationResponse* response) {
   if (![response respondsToSelector:@selector(actionIdentifier)] ||
       ![response respondsToSelector:@selector(notification)]) {
     return nil;
@@ -82,7 +78,7 @@ static NSDictionary* UNNotificationResponseToNSDictionary(
     if ([user_notification isKindOfClass:[NSUserNotification class]]) {
       notification_info =
           [static_cast<NSUserNotification*>(user_notification) userInfo];
-    } else if (@available(macOS 10.14, *)) {
+    } else {
       notification_info = UNNotificationResponseToNSDictionary(
           static_cast<UNNotificationResponse*>(user_notification));
     }
@@ -200,6 +196,14 @@ static NSDictionary* UNNotificationResponseToNSDictionary(
     electron::api::PushNotifications::Get()->OnDidReceiveAPNSNotification(
         electron::NSDictionaryToValue(userInfo));
   }
+}
+
+// This only has an effect on macOS 12+, and requests any state restoration
+// archive to be created with secure encoding. See the article at
+// https://sector7.computest.nl/post/2022-08-process-injection-breaking-all-macos-security-layers-with-a-single-vulnerability/
+// for more details.
+- (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app {
+  return YES;
 }
 
 @end

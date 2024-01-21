@@ -121,9 +121,7 @@ class Archive : public node::ObjectWrap {
     gin_helper::Dictionary dict(isolate, v8::Object::New(isolate));
     dict.Set("size", stats.size);
     dict.Set("offset", stats.offset);
-    dict.Set("isFile", stats.is_file);
-    dict.Set("isDirectory", stats.is_directory);
-    dict.Set("isLink", stats.is_link);
+    dict.Set("type", static_cast<int>(stats.type));
     args.GetReturnValue().Set(dict.GetHandle());
   }
 
@@ -201,9 +199,9 @@ static void InitAsarSupport(const v8::FunctionCallbackInfo<v8::Value>& args) {
   std::vector<v8::Local<v8::String>> asar_bundle_params = {
       node::FIXED_ONE_BYTE_STRING(isolate, "require")};
   std::vector<v8::Local<v8::Value>> asar_bundle_args = {require};
-  electron::util::CompileAndCall(
-      isolate->GetCurrentContext(), "electron/js2c/asar_bundle",
-      &asar_bundle_params, &asar_bundle_args, nullptr);
+  electron::util::CompileAndCall(isolate->GetCurrentContext(),
+                                 "electron/js2c/asar_bundle",
+                                 &asar_bundle_params, &asar_bundle_args);
 }
 
 static void SplitPath(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -215,7 +213,7 @@ static void SplitPath(const v8::FunctionCallbackInfo<v8::Value>& args) {
     return;
   }
 
-  gin_helper::Dictionary dict = gin::Dictionary::CreateEmpty(isolate);
+  auto dict = gin_helper::Dictionary::CreateEmpty(isolate);
   base::FilePath asar_path, file_path;
   if (asar::GetAsarArchivePath(path, &asar_path, &file_path, true)) {
     dict.Set("isAsar", true);

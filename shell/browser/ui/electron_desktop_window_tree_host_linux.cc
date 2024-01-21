@@ -17,18 +17,11 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/linux/linux_ui.h"
+#include "ui/ozone/public/ozone_platform.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_linux.h"
 #include "ui/views/window/non_client_view.h"
-
-#if defined(USE_OZONE)
-#include "ui/ozone/buildflags.h"
-#if BUILDFLAG(OZONE_PLATFORM_X11)
-#define USE_OZONE_PLATFORM_X11
-#endif
-#include "ui/ozone/public/ozone_platform.h"
-#endif
 
 namespace electron {
 
@@ -57,7 +50,6 @@ void ElectronDesktopWindowTreeHostLinux::OnBoundsChanged(
   views::DesktopWindowTreeHostLinux::OnBoundsChanged(change);
   UpdateFrameHints();
 
-#if defined(USE_OZONE_PLATFORM_X11)
   if (ui::OzonePlatform::GetInstance()
           ->GetPlatformProperties()
           .electron_can_call_x11) {
@@ -67,7 +59,6 @@ void ElectronDesktopWindowTreeHostLinux::OnBoundsChanged(
     // X11Window::ToggleFullscreen in ui/ozone/platform/x11/x11_window.cc.
     UpdateWindowState(platform_window()->GetPlatformWindowState());
   }
-#endif
 }
 
 void ElectronDesktopWindowTreeHostLinux::OnWindowStateChanged(
@@ -181,8 +172,7 @@ void ElectronDesktopWindowTreeHostLinux::UpdateClientDecorationHints(
 
   gfx::Rect input_bounds(view->GetWidget()->GetWindowBoundsInScreen().size());
   input_bounds.Inset(insets + input_insets);
-  gfx::Rect scaled_bounds = gfx::ScaleToEnclosingRect(input_bounds, scale);
-  window->SetInputRegion(&scaled_bounds);
+  window->SetInputRegion(gfx::ScaleToEnclosingRect(input_bounds, scale));
 
   if (should_set_opaque_region) {
     // The opaque region is a list of rectangles that contain only fully
@@ -224,8 +214,8 @@ void ElectronDesktopWindowTreeHostLinux::UpdateClientDecorationHints(
     // Convert the region to a list of rectangles.
     std::vector<gfx::Rect> opaque_region;
     for (SkRegion::Iterator i(region); !i.done(); i.next())
-      opaque_region.push_back(gfx::SkIRectToRect(i.rect()));
-    window->SetOpaqueRegion(&opaque_region);
+      opaque_region.emplace_back(gfx::SkIRectToRect(i.rect()));
+    window->SetOpaqueRegion(opaque_region);
   }
 }
 

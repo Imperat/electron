@@ -16,6 +16,7 @@
 #include "media/base/media_switches.h"
 #include "net/base/features.h"
 #include "services/network/public/cpp/features.h"
+#include "third_party/blink/public/common/features.h"
 
 #if BUILDFLAG(IS_MAC)
 #include "device/base/features.h"  // nogncheck
@@ -36,6 +37,9 @@ void InitializeFeatureList() {
   disable_features +=
       std::string(",") + features::kSpareRendererForSitePerProcess.name;
 
+  // TODO(codebytere): Remove WebSQL support per crbug.com/695592.
+  enable_features += std::string(",") + blink::features::kWebSQLAccess.name;
+
 #if BUILDFLAG(IS_WIN)
   disable_features +=
       // Disable async spellchecker suggestions for Windows, which causes
@@ -45,7 +49,7 @@ void InitializeFeatureList() {
       // 'custom dictionary word list API' spec to crash.
       std::string(",") + spellcheck::kWinDelaySpellcheckServiceInit.name;
 #endif
-  base::FeatureList::InitializeInstance(enable_features, disable_features);
+  base::FeatureList::InitInstance(enable_features, disable_features);
 }
 
 void InitializeFieldTrials() {

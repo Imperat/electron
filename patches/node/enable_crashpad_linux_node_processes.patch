@@ -8,10 +8,10 @@ to child processes spawned with `ELECTRON_RUN_AS_NODE` which is used
 by the crashpad client to connect with the handler process.
 
 diff --git a/lib/child_process.js b/lib/child_process.js
-index 07ad7906a7be156926d0c770c3d766c1a411203b..31061418c21d3764685110e827fc5ff536c74430 100644
+index 9dd33ecbac3a5d516f9bff76fdbe1a8aece531f2..0464ecc7b53389cdff97a7fe4cb01582e8b72dbb 100644
 --- a/lib/child_process.js
 +++ b/lib/child_process.js
-@@ -60,6 +60,7 @@ let debug = require('internal/util/debuglog').debuglog(
+@@ -61,6 +61,7 @@ let debug = require('internal/util/debuglog').debuglog(
  );
  const { Buffer } = require('buffer');
  const { Pipe, constants: PipeConstants } = internalBinding('pipe_wrap');
@@ -19,7 +19,7 @@ index 07ad7906a7be156926d0c770c3d766c1a411203b..31061418c21d3764685110e827fc5ff5
  
  const {
    AbortError,
-@@ -163,7 +164,6 @@ function fork(modulePath, args = [], options) {
+@@ -162,7 +163,6 @@ function fork(modulePath, args = [], options) {
        ArrayPrototypeSplice(execArgv, index - 1, 2);
      }
    }

@@ -90,7 +90,7 @@ describe('asar package', () => {
       await w.loadFile(path.join(fixtures, 'workers', 'load_worker.html'));
 
       const workerUrl = url.format({
-        pathname: path.resolve(fixtures, 'workers', 'workers.asar', 'worker.js').replace(/\\/g, '/'),
+        pathname: path.resolve(fixtures, 'workers', 'workers.asar', 'worker.js').replaceAll('\\', '/'),
         protocol: 'file',
         slashes: true
       });
@@ -103,7 +103,7 @@ describe('asar package', () => {
       await w.loadFile(path.join(fixtures, 'workers', 'load_shared_worker.html'));
 
       const workerUrl = url.format({
-        pathname: path.resolve(fixtures, 'workers', 'workers.asar', 'shared_worker.js').replace(/\\/g, '/'),
+        pathname: path.resolve(fixtures, 'workers', 'workers.asar', 'shared_worker.js').replaceAll('\\', '/'),
         protocol: 'file',
         slashes: true
       });
@@ -488,6 +488,15 @@ describe('asar package', function () {
           expect(() => {
             fs.lstatSync(p);
           }).to.throw(/ENOENT/);
+        }
+      });
+
+      itremote('returns null when can not find file with throwIfNoEntry === false', function () {
+        const ref2 = ['file4', 'file5', path.join('dir1', 'file4')];
+        for (let j = 0, len = ref2.length; j < len; j++) {
+          const file = ref2[j];
+          const p = path.join(asarDir, 'a.asar', file);
+          expect(fs.lstatSync(p, { throwIfNoEntry: false })).to.equal(null);
         }
       });
     });
@@ -1243,7 +1252,7 @@ describe('asar package', function () {
           const echo = path.join(asarDir, 'echo.asar', 'echo');
 
           const stdout = await promisify(require(childProcess).exec)('echo ' + echo + ' foo bar');
-          expect(stdout.toString().replace(/\r/g, '')).to.equal(echo + ' foo bar\n');
+          expect(stdout.toString().replaceAll('\r', '')).to.equal(echo + ' foo bar\n');
         }, [childProcess]);
       });
 
@@ -1252,7 +1261,7 @@ describe('asar package', function () {
           const echo = path.join(asarDir, 'echo.asar', 'echo');
 
           const stdout = require(childProcess).execSync('echo ' + echo + ' foo bar');
-          expect(stdout.toString().replace(/\r/g, '')).to.equal(echo + ' foo bar\n');
+          expect(stdout.toString().replaceAll('\r', '')).to.equal(echo + ' foo bar\n');
         }, [childProcess]);
       });
 
@@ -1312,7 +1321,6 @@ describe('asar package', function () {
       itremote('can promisify all fs functions', function () {
         const originalFs = require('original-fs');
         const util = require('node:util');
-        const { hasOwnProperty } = Object.prototype;
 
         for (const [propertyName, originalValue] of Object.entries(originalFs)) {
           // Some properties exist but have a value of `undefined` on some platforms.
@@ -1321,7 +1329,7 @@ describe('asar package', function () {
           // Also check for `null`s, `hasOwnProperty()` can't handle them.
           if (typeof originalValue === 'undefined' || originalValue === null) continue;
 
-          if (hasOwnProperty.call(originalValue, util.promisify.custom)) {
+          if (Object.hasOwn(originalValue, util.promisify.custom)) {
             expect(fs).to.have.own.property(propertyName)
               .that.has.own.property(util.promisify.custom);
           }

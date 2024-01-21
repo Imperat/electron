@@ -104,7 +104,7 @@ describe('protocol module', () => {
         try {
           callback(text);
           callback('');
-        } catch (error) {
+        } catch {
           // Ignore error
         }
       });
@@ -263,7 +263,7 @@ describe('protocol module', () => {
         expect(r.headers).to.have.property('x-great-header', 'sogreat');
       });
 
-      it('can load iframes with custom protocols', (done) => {
+      it('can load iframes with custom protocols', async () => {
         registerFileProtocol('custom', (request, callback) => {
           const filename = request.url.substring(9);
           const p = path.join(__dirname, 'fixtures', 'pages', filename);
@@ -278,8 +278,9 @@ describe('protocol module', () => {
           }
         });
 
+        const loaded = once(ipcMain, 'loaded-iframe-custom-protocol');
         w.loadFile(path.join(__dirname, 'fixtures', 'pages', 'iframe-protocol.html'));
-        ipcMain.once('loaded-iframe-custom-protocol', () => done());
+        await loaded;
       });
 
       it('sends object as response', async () => {
@@ -557,7 +558,7 @@ describe('protocol module', () => {
         try {
           callback(text);
           callback('');
-        } catch (error) {
+        } catch {
           // Ignore error
         }
       });
@@ -1089,6 +1090,33 @@ describe('protocol module', () => {
     }
   });
 
+  describe('protocol.registerSchemesAsPrivileged codeCache', function () {
+    const temp = require('temp').track();
+    const appPath = path.join(fixturesPath, 'apps', 'refresh-page');
+
+    let w: BrowserWindow;
+    let codeCachePath: string;
+    beforeEach(async () => {
+      w = new BrowserWindow({ show: false });
+      codeCachePath = temp.path();
+    });
+
+    afterEach(async () => {
+      await closeWindow(w);
+      w = null as unknown as BrowserWindow;
+    });
+
+    it('code cache in custom protocol is disabled by default', async () => {
+      ChildProcess.spawnSync(process.execPath, [appPath, 'false', codeCachePath]);
+      expect(fs.readdirSync(path.join(codeCachePath, 'js')).length).to.equal(2);
+    });
+
+    it('codeCache:true enables codeCache in custom protocol', async () => {
+      ChildProcess.spawnSync(process.execPath, [appPath, 'true', codeCachePath]);
+      expect(fs.readdirSync(path.join(codeCachePath, 'js')).length).to.above(2);
+    });
+  });
+
   describe('handle', () => {
     afterEach(closeAllWindows);
 
@@ -1106,7 +1134,7 @@ describe('protocol module', () => {
           // In case of failure, make sure we unhandle. But we should succeed
           // :)
           protocol.unhandle('test-scheme');
-        } catch (_ignored) { /* ignore */ }
+        } catch { /* ignore */ }
       });
       const resp1 = await net.fetch('test-scheme://foo');
       expect(resp1.status).to.equal(200);
@@ -1114,11 +1142,32 @@ describe('protocol module', () => {
       await expect(net.fetch('test-scheme://foo')).to.eventually.be.rejectedWith(/ERR_UNKNOWN_URL_SCHEME/);
     });
 
-    it('receives requests to an existing scheme', async () => {
+    it('receives requests to the existing https scheme', async () => {
       protocol.handle('https', (req) => new Response('hello ' + req.url));
       defer(() => { protocol.unhandle('https'); });
       const body = await net.fetch('https://foo').then(r => r.text());
       expect(body).to.equal('hello https://foo/');
+    });
+
+    it('receives requests to the existing file scheme', (done) => {
+      const filePath = path.join(__dirname, 'fixtures', 'pages', 'a.html');
+
+      protocol.handle('file', (req) => {
+        let file;
+        if (process.platform === 'win32') {
+          file = `file:///${filePath.replaceAll('\\', '/')}`;
+        } else {
+          file = `file://${filePath}`;
+        }
+
+        if (req.url === file) done();
+        return new Response(req.url);
+      });
+
+      defer(() => { protocol.unhandle('file'); });
+
+      const w = new BrowserWindow();
+      w.loadFile(filePath);
     });
 
     it('receives requests to an existing scheme when navigating', async () => {

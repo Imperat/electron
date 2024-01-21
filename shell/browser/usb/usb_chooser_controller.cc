@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -35,12 +36,12 @@ namespace electron {
 
 UsbChooserController::UsbChooserController(
     RenderFrameHost* render_frame_host,
-    std::vector<device::mojom::UsbDeviceFilterPtr> device_filters,
+    blink::mojom::WebUsbRequestDeviceOptionsPtr options,
     blink::mojom::WebUsbService::GetPermissionCallback callback,
     content::WebContents* web_contents,
     base::WeakPtr<ElectronUsbDelegate> usb_delegate)
     : WebContentsObserver(web_contents),
-      filters_(std::move(device_filters)),
+      options_(std::move(options)),
       callback_(std::move(callback)),
       origin_(render_frame_host->GetMainFrame()->GetLastCommittedOrigin()),
       usb_delegate_(usb_delegate),
@@ -105,7 +106,7 @@ void UsbChooserController::OnBrowserContextShutdown() {
 }
 
 // Get a list of devices that can be shown in the chooser bubble UI for
-// user to grant permsssion.
+// user to grant permission.
 void UsbChooserController::GotUsbDeviceList(
     std::vector<::device::mojom::UsbDeviceInfoPtr> devices) {
   // Listen to UsbChooserContext for OnDeviceAdded/Removed events after the
@@ -136,8 +137,16 @@ void UsbChooserController::GotUsbDeviceList(
 
 bool UsbChooserController::DisplayDevice(
     const device::mojom::UsbDeviceInfo& device_info) const {
-  if (!device::UsbDeviceFilterMatchesAny(filters_, device_info))
+  if (!device::UsbDeviceFilterMatchesAny(options_->filters, device_info)) {
     return false;
+  }
+
+  if (base::ranges::any_of(
+          options_->exclusion_filters, [&device_info](const auto& filter) {
+            return device::UsbDeviceFilterMatches(*filter, device_info);
+          })) {
+    return false;
+  }
 
   return true;
 }

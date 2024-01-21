@@ -137,7 +137,7 @@ void ElectronSandboxedRendererClient::InitializeBindings(
   b.SetMethod("get", GetBinding);
   b.SetMethod("createPreloadScript", CreatePreloadScript);
 
-  gin_helper::Dictionary process = gin::Dictionary::CreateEmpty(isolate);
+  auto process = gin_helper::Dictionary::CreateEmpty(isolate);
   b.Set("process", process);
 
   ElectronBindings::BindProcess(isolate, &process, metrics_.get());
@@ -192,7 +192,7 @@ void ElectronSandboxedRendererClient::DidCreateScriptContext(
 
   util::CompileAndCall(
       isolate->GetCurrentContext(), "electron/js2c/sandbox_bundle",
-      &sandbox_preload_bundle_params, &sandbox_preload_bundle_args, nullptr);
+      &sandbox_preload_bundle_params, &sandbox_preload_bundle_args);
 
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context);

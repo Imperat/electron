@@ -114,8 +114,8 @@ base::win::ScopedHICON ReadICOFromPath(int size, const base::FilePath& path) {
 
   // Load the icon from file.
   return base::win::ScopedHICON(
-      static_cast<HICON>(LoadImage(NULL, image_path.value().c_str(), IMAGE_ICON,
-                                   size, size, LR_LOADFROMFILE)));
+      static_cast<HICON>(LoadImage(nullptr, image_path.value().c_str(),
+                                   IMAGE_ICON, size, size, LR_LOADFROMFILE)));
 }
 #endif
 
@@ -202,21 +202,23 @@ bool NativeImage::TryConvertNativeImage(v8::Isolate* isolate,
 
 #if BUILDFLAG(IS_WIN)
 HICON NativeImage::GetHICON(int size) {
-  auto iter = hicons_.find(size);
-  if (iter != hicons_.end())
+  if (auto iter = hicons_.find(size); iter != hicons_.end())
     return iter->second.get();
 
   // First try loading the icon with specified size.
   if (!hicon_path_.empty()) {
-    hicons_[size] = ReadICOFromPath(size, hicon_path_);
-    return hicons_[size].get();
+    auto& hicon = hicons_[size];
+    hicon = ReadICOFromPath(size, hicon_path_);
+    return hicon.get();
   }
 
   // Then convert the image to ICO.
   if (image_.IsEmpty())
-    return NULL;
-  hicons_[size] = IconUtil::CreateHICONFromSkBitmap(image_.AsBitmap());
-  return hicons_[size].get();
+    return nullptr;
+
+  auto& hicon = hicons_[size];
+  hicon = IconUtil::CreateHICONFromSkBitmap(image_.AsBitmap());
+  return hicon.get();
 }
 #endif
 
@@ -322,7 +324,7 @@ bool NativeImage::IsEmpty() {
   return image_.IsEmpty();
 }
 
-gfx::Size NativeImage::GetSize(const absl::optional<float> scale_factor) {
+gfx::Size NativeImage::GetSize(const std::optional<float> scale_factor) {
   float sf = scale_factor.value_or(1.0f);
   gfx::ImageSkiaRep image_rep = image_.AsImageSkia().GetRepresentation(sf);
 
@@ -338,7 +340,7 @@ std::vector<float> NativeImage::GetScaleFactors() {
   return scale_factors;
 }
 
-float NativeImage::GetAspectRatio(const absl::optional<float> scale_factor) {
+float NativeImage::GetAspectRatio(const std::optional<float> scale_factor) {
   float sf = scale_factor.value_or(1.0f);
   gfx::Size size = GetSize(sf);
   if (size.IsEmpty())
@@ -352,8 +354,8 @@ gin::Handle<NativeImage> NativeImage::Resize(gin::Arguments* args,
   float scale_factor = GetScaleFactorFromOptions(args);
 
   gfx::Size size = GetSize(scale_factor);
-  absl::optional<int> new_width = options.FindInt("width");
-  absl::optional<int> new_height = options.FindInt("height");
+  std::optional<int> new_width = options.FindInt("width");
+  std::optional<int> new_height = options.FindInt("height");
   int width = new_width.value_or(size.width());
   int height = new_height.value_or(size.height());
   size.SetSize(width, height);
@@ -641,7 +643,7 @@ void Initialize(v8::Local<v8::Object> exports,
                 void* priv) {
   v8::Isolate* isolate = context->GetIsolate();
   gin_helper::Dictionary dict(isolate, exports);
-  gin_helper::Dictionary native_image = gin::Dictionary::CreateEmpty(isolate);
+  auto native_image = gin_helper::Dictionary::CreateEmpty(isolate);
   dict.Set("nativeImage", native_image);
 
   native_image.SetMethod("createEmpty", &NativeImage::CreateEmpty);

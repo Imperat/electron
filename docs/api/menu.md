@@ -80,6 +80,10 @@ The `menu` object has the following instance methods:
   * `positioningItem` number (optional) _macOS_ - The index of the menu item to
     be positioned under the mouse cursor at the specified coordinates. Default
     is -1.
+  * `sourceType` string (optional) _Windows_ _Linux_ - This should map to the `menuSourceType`
+    provided by the `context-menu` event. It is not recommended to set this value manually,
+    only provide values you receive from other APIs or leave it `undefined`.
+    Can be `none`, `mouse`, `keyboard`, `touch`, `touchMenu`, `longPress`, `longTap`, `touchHandle`, `stylus`, `adjustSelection`, or `adjustSelectionReset`.
   * `callback` Function (optional) - Called when menu is closed.
 
 Pops up this menu as a context menu in the [`BrowserWindow`](browser-window.md).
@@ -147,7 +151,7 @@ can have a submenu.
 
 An example of creating the application menu with the simple template API:
 
-```javascript @ts-expect-error=[107]
+```js @ts-expect-error=[107]
 const { app, Menu } = require('electron')
 
 const isMac = process.platform === 'darwin'
@@ -349,7 +353,7 @@ By default, items will be inserted in the order they exist in the template unles
 
 Template:
 
-```javascript
+```js
 [
   { id: '1', label: 'one' },
   { id: '2', label: 'two' },
@@ -369,7 +373,7 @@ Menu:
 
 Template:
 
-```javascript
+```js
 [
   { id: '1', label: 'one' },
   { type: 'separator' },
@@ -393,7 +397,7 @@ Menu:
 
 Template:
 
-```javascript
+```js
 [
   { id: '1', label: 'one', after: ['3'] },
   { id: '2', label: 'two', before: ['1'] },

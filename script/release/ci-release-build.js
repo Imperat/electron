@@ -183,7 +183,14 @@ async function circleCIRequest (url, method, requestBody) {
   }
 
   return makeRequest(requestOpts, true).catch(err => {
-    console.log('Error calling CircleCI:', err);
+    if (err.response?.body) {
+      console.error('Could not call CircleCI: ', {
+        statusCode: err.response.statusCode,
+        body: JSON.parse(err.response.body)
+      });
+    } else {
+      console.error('Error calling CircleCI:', err);
+    }
   });
 }
 
@@ -193,7 +200,9 @@ function buildAppVeyor (targetBranch, options) {
     assert(validJobs.includes(options.job), `Unknown AppVeyor CI job name: ${options.job}.  Valid values are: ${validJobs}.`);
     callAppVeyor(targetBranch, options.job, options);
   } else {
-    validJobs.forEach((job) => callAppVeyor(targetBranch, job, options));
+    for (const job of validJobs) {
+      callAppVeyor(targetBranch, job, options);
+    }
   }
 }
 
@@ -232,7 +241,14 @@ async function callAppVeyor (targetBranch, job, options) {
     const buildUrl = `https://ci.appveyor.com/project/electron-bot/${appVeyorJobs[job]}/build/${version}`;
     console.log(`AppVeyor release build request for ${job} successful.  Check build status at ${buildUrl}`);
   } catch (err) {
-    console.log('Could not call AppVeyor: ', err);
+    if (err.response?.body) {
+      console.error('Could not call AppVeyor: ', {
+        statusCode: err.response.statusCode,
+        body: JSON.parse(err.response.body)
+      });
+    } else {
+      console.error('Error calling AppVeyor:', err);
+    }
   }
 }
 
@@ -243,7 +259,9 @@ function buildCircleCI (targetBranch, options) {
   } else {
     assert(!options.arch, 'Cannot provide a single architecture while building all workflows, please specify a single workflow via --workflow');
     options.runningPublishWorkflows = true;
-    circleCIPublishWorkflows.forEach((job) => circleCIcall(targetBranch, job, options));
+    for (const job of circleCIPublishWorkflows) {
+      circleCIcall(targetBranch, job, options);
+    }
   }
 }
 

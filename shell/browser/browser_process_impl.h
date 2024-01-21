@@ -4,8 +4,8 @@
 
 // This interface is for managing the global services of the application. Each
 // service is lazily created when requested the first time. The service getters
-// will return NULL if the service is not available, so callers must check for
-// this condition.
+// will return nullptr if the service is not available, so callers must check
+// for this condition.
 
 #ifndef ELECTRON_SHELL_BROWSER_BROWSER_PROCESS_IMPL_H_
 #define ELECTRON_SHELL_BROWSER_BROWSER_PROCESS_IMPL_H_
@@ -23,6 +23,10 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "shell/browser/net/system_network_context_manager.h"
 
+#if BUILDFLAG(IS_LINUX)
+#include "components/os_crypt/sync/key_storage_util_linux.h"
+#endif
+
 namespace printing {
 class PrintJobManager;
 }
@@ -31,7 +35,7 @@ class PrintJobManager;
 class BackgroundModeManager {};
 
 // NOT THREAD SAFE, call only from the main thread.
-// These functions shouldn't return NULL unless otherwise noted.
+// These functions shouldn't return nullptr unless otherwise noted.
 class BrowserProcessImpl : public BrowserProcess {
  public:
   BrowserProcessImpl();
@@ -52,6 +56,11 @@ class BrowserProcessImpl : public BrowserProcess {
 
   void SetSystemLocale(const std::string& locale);
   const std::string& GetSystemLocale() const;
+
+#if BUILDFLAG(IS_LINUX)
+  void SetLinuxStorageBackend(os_crypt::SelectedLinuxBackend selected_backend);
+  const std::string& GetLinuxStorageBackend() const;
+#endif
 
   void EndSession() override {}
   void FlushLocalStateAndReply(base::OnceClosure reply) override {}
@@ -98,6 +107,8 @@ class BrowserProcessImpl : public BrowserProcess {
   resource_coordinator::TabManager* GetTabManager() override;
   SerialPolicyAllowedPorts* serial_policy_allowed_ports() override;
   HidSystemTrayIcon* hid_system_tray_icon() override;
+  UsbSystemTrayIcon* usb_system_tray_icon() override;
+  os_crypt_async::OSCryptAsync* os_crypt_async() override;
   void CreateDevToolsProtocolHandler() override {}
   void CreateDevToolsAutoOpener() override {}
   void set_background_mode_manager_for_test(
@@ -112,6 +123,7 @@ class BrowserProcessImpl : public BrowserProcess {
 
  private:
   void CreateNetworkQualityObserver();
+  void CreateOSCryptAsync();
   network::NetworkQualityTracker* GetNetworkQualityTracker();
 
 #if BUILDFLAG(ENABLE_PRINTING)
@@ -120,12 +132,17 @@ class BrowserProcessImpl : public BrowserProcess {
   std::unique_ptr<PrefService> local_state_;
   std::string locale_;
   std::string system_locale_;
+#if BUILDFLAG(IS_LINUX)
+  std::string selected_linux_storage_backend_;
+#endif
   embedder_support::OriginTrialsSettingsStorage origin_trials_settings_storage_;
 
   std::unique_ptr<network::NetworkQualityTracker> network_quality_tracker_;
   std::unique_ptr<
       network::NetworkQualityTracker::RTTAndThroughputEstimatesObserver>
       network_quality_observer_;
+
+  std::unique_ptr<os_crypt_async::OSCryptAsync> os_crypt_async_;
 };
 
 #endif  // ELECTRON_SHELL_BROWSER_BROWSER_PROCESS_IMPL_H_
