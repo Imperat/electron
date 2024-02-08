@@ -11,10 +11,10 @@
 #import <Cocoa/Cocoa.h>
 #import <CoreServices/CoreServices.h>
 
+#include "base/apple/foundation_util.h"
+#include "base/apple/scoped_cftyperef.h"
 #include "base/files/file_util.h"
-#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
-#include "base/mac/scoped_cftyperef.h"
 #include "base/strings/sys_string_conversions.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -66,15 +66,18 @@
 
 // Manages the PopUpButtonHandler.
 @interface ElectronAccessoryView : NSView
+@property(nonatomic, strong) PopUpButtonHandler* popUpButtonHandler;
 @end
 
 @implementation ElectronAccessoryView
 
+@synthesize popUpButtonHandler;
+
 - (void)dealloc {
   auto* popupButton =
       static_cast<NSPopUpButton*>([[self subviews] objectAtIndex:1]);
-  [[popupButton target] release];
-  [super dealloc];
+  popupButton.target = nil;
+  popUpButtonHandler = nil;
 }
 
 @end
@@ -148,10 +151,11 @@ void SetAllowedFileTypes(NSSavePanel* dialog, const Filters& filters) {
   [popupButton setTarget:popUpButtonHandler];
   [popupButton setAction:@selector(selectFormat:)];
 
-  [accessoryView addSubview:[label autorelease]];
-  [accessoryView addSubview:[popupButton autorelease]];
+  [accessoryView addSubview:label];
+  [accessoryView addSubview:popupButton];
+  [accessoryView setPopUpButtonHandler:popUpButtonHandler];
 
-  [dialog setAccessoryView:[accessoryView autorelease]];
+  [dialog setAccessoryView:accessoryView];
 }
 
 void SetupDialog(NSSavePanel* dialog, const DialogSettings& settings) {

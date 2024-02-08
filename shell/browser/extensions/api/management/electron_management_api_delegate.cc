@@ -103,18 +103,6 @@ extensions::LaunchType ElectronManagementAPIDelegate::GetLaunchType(
   return extensions::LAUNCH_TYPE_DEFAULT;
 }
 
-void ElectronManagementAPIDelegate::
-    GetPermissionWarningsByManifestFunctionDelegate(
-        extensions::ManagementGetPermissionWarningsByManifestFunction* function,
-        const std::string& manifest_str) const {
-  data_decoder::DataDecoder::ParseJsonIsolated(
-      manifest_str,
-      base::BindOnce(
-          &extensions::ManagementGetPermissionWarningsByManifestFunction::
-              OnParse,
-          function));
-}
-
 std::unique_ptr<extensions::InstallPromptDelegate>
 ElectronManagementAPIDelegate::SetEnabledFunctionDelegate(
     content::WebContents* web_contents,
@@ -162,23 +150,6 @@ void ElectronManagementAPIDelegate::InstallOrLaunchReplacementWebApp(
     const GURL& web_app_url,
     InstallOrLaunchWebAppCallback callback) const {
   // TODO(sentialx)
-}
-
-bool ElectronManagementAPIDelegate::CanContextInstallAndroidApps(
-    content::BrowserContext* context) const {
-  return false;
-}
-
-void ElectronManagementAPIDelegate::CheckAndroidAppInstallStatus(
-    const std::string& package_name,
-    AndroidAppInstallStatusCallback callback) const {
-  std::move(callback).Run(false);
-}
-
-void ElectronManagementAPIDelegate::InstallReplacementAndroidApp(
-    const std::string& package_name,
-    InstallAndroidAppCallback callback) const {
-  std::move(callback).Run(false);
 }
 
 void ElectronManagementAPIDelegate::EnableExtension(

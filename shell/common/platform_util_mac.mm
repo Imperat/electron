@@ -11,12 +11,12 @@
 #import <Cocoa/Cocoa.h>
 #import <ServiceManagement/ServiceManagement.h>
 
+#include "base/apple/foundation_util.h"
+#include "base/apple/osstatus_logging.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/callback.h"
 #include "base/logging.h"
-#include "base/mac/foundation_util.h"
-#include "base/mac/mac_logging.h"
 #include "base/mac/scoped_aedesc.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
@@ -30,8 +30,9 @@ namespace {
 // thread safe, including LSGetApplicationForURL (> 10.2) and
 // NSWorkspace#openURLs.
 std::string OpenURL(NSURL* ns_url, bool activate) {
-  CFURLRef ref = LSCopyDefaultApplicationURLForURL(
-      base::mac::NSToCFCast(ns_url), kLSRolesAll, nullptr);
+  CFURLRef cf_url = (__bridge CFURLRef)(ns_url);
+  CFURLRef ref =
+      LSCopyDefaultApplicationURLForURL(cf_url, kLSRolesAll, nullptr);
 
   // If no application could be found, NULL is returned and outError
   // (if not NULL) is populated with kLSApplicationNotFoundErr.

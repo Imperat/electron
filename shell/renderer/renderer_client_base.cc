@@ -235,14 +235,6 @@ void RendererClientBase::RenderThreadStarted() {
   extensions::ExtensionsRendererClient::Set(extensions_renderer_client_.get());
 
   thread->AddObserver(extensions_renderer_client_->GetDispatcher());
-#endif
-
-#if BUILDFLAG(ENABLE_BUILTIN_SPELLCHECKER)
-  spellcheck_ = std::make_unique<SpellCheck>(this);
-#endif
-
-  blink::WebCustomElement::AddEmbedderCustomElementName("webview");
-  blink::WebCustomElement::AddEmbedderCustomElementName("browserplugin");
 
   WTF::String extension_scheme(extensions::kExtensionScheme);
   // Extension resources are HTTP-like and safe to expose to the fetch API. The
@@ -255,6 +247,14 @@ void RendererClientBase::RenderThreadStarted() {
       extension_scheme);
   blink::SchemeRegistry::RegisterURLSchemeAsBypassingContentSecurityPolicy(
       extension_scheme);
+#endif
+
+#if BUILDFLAG(ENABLE_BUILTIN_SPELLCHECKER)
+  spellcheck_ = std::make_unique<SpellCheck>(this);
+#endif
+
+  blink::WebCustomElement::AddEmbedderCustomElementName("webview");
+  blink::WebCustomElement::AddEmbedderCustomElementName("browserplugin");
 
   std::vector<std::string> fetch_enabled_schemes =
       ParseSchemesCLISwitch(command_line, switches::kFetchSchemes);
@@ -274,6 +274,13 @@ void RendererClientBase::RenderThreadStarted() {
   for (const std::string& scheme : csp_bypassing_schemes)
     blink::SchemeRegistry::RegisterURLSchemeAsBypassingContentSecurityPolicy(
         WTF::String::FromUTF8(scheme.data(), scheme.length()));
+
+  std::vector<std::string> code_cache_schemes_list =
+      ParseSchemesCLISwitch(command_line, switches::kCodeCacheSchemes);
+  for (const auto& scheme : code_cache_schemes_list) {
+    blink::WebSecurityPolicy::RegisterURLSchemeAsCodeCacheWithHashing(
+        blink::WebString::FromASCII(scheme));
+  }
 
   // Allow file scheme to handle service worker by default.
   // FIXME(zcbenz): Can this be moved elsewhere?
@@ -608,8 +615,8 @@ void RendererClientBase::SetupMainWorldOverrides(
   if (global.GetHidden("guestViewInternal", &guest_view_internal)) {
     api::context_bridge::ObjectCache object_cache;
     auto result = api::PassValueToOtherContext(
-        source_context, context, guest_view_internal, &object_cache, false, 0,
-        api::BridgeErrorTarget::kSource);
+        source_context, context, guest_view_internal, source_context->Global(),
+        &object_cache, false, 0, api::BridgeErrorTarget::kSource);
     if (!result.IsEmpty()) {
       isolated_api.Set("guestViewInternal", result.ToLocalChecked());
     }

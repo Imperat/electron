@@ -45,9 +45,11 @@ class BrowserView : public gin::Wrappable<BrowserView>,
   static gin::Handle<BrowserView> New(gin_helper::ErrorThrower thrower,
                                       gin::Arguments* args);
   static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
+  static const char* GetClassName() { return "BrowserView"; }
 
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
+  const char* GetTypeName() override;
 
   WebContents* web_contents() const { return api_web_contents_; }
   NativeBrowserView* view() const { return view_.get(); }
@@ -64,6 +66,9 @@ class BrowserView : public gin::Wrappable<BrowserView>,
   BrowserView(const BrowserView&) = delete;
   BrowserView& operator=(const BrowserView&) = delete;
 
+  gfx::Rect GetBounds();
+  void SetBounds(const gfx::Rect& bounds);
+
  protected:
   BrowserView(gin::Arguments* args, const gin_helper::Dictionary& options);
   ~BrowserView() override;
@@ -76,8 +81,6 @@ class BrowserView : public gin::Wrappable<BrowserView>,
 
  private:
   void SetAutoResize(AutoResizeFlags flags);
-  void SetBounds(const gfx::Rect& bounds);
-  gfx::Rect GetBounds();
   void SetBackgroundColor(const std::string& color_name);
   v8::Local<v8::Value> GetWebContents(v8::Isolate*);
 

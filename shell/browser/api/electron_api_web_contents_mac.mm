@@ -38,15 +38,9 @@ bool WebContents::IsFocused() const {
 bool WebContents::PlatformHandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  if (event.skip_in_browser ||
+  if (event.skip_if_unhandled ||
       event.GetType() == content::NativeWebKeyboardEvent::Type::kChar)
     return false;
-
-  // Escape exits tabbed fullscreen mode.
-  if (event.windows_key_code == ui::VKEY_ESCAPE && is_html_fullscreen()) {
-    ExitFullscreenModeForTab(source);
-    return true;
-  }
 
   // Check if the webContents has preferences and to ignore shortcuts
   auto* web_preferences = WebContentsPreferences::From(source);

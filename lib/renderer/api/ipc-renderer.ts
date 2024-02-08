@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import * as deprecate from '@electron/internal/common/deprecate';
 
 const { ipc } = process._linkedBinding('electron_renderer_ipc');
 
@@ -17,7 +18,9 @@ ipcRenderer.sendToHost = function (channel, ...args) {
   return ipc.sendToHost(channel, args);
 };
 
+const sendToDeprecated = deprecate.warnOnce('ipcRenderer.sendTo');
 ipcRenderer.sendTo = function (webContentsId, channel, ...args) {
+  sendToDeprecated();
   return ipc.sendTo(webContentsId, channel, args);
 };
 

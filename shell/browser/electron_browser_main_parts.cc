@@ -14,6 +14,7 @@
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/field_trial.h"
+#include "base/nix/xdg_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,8 +24,8 @@
 #include "chrome/browser/ui/color/chrome_color_mixers.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/embedder_support/origin_trials/origin_trials_settings_storage.h"
 #include "components/os_crypt/sync/key_storage_config_linux.h"
+#include "components/os_crypt/sync/key_storage_util_linux.h"
 #include "components/os_crypt/sync/os_crypt.h"
 #include "content/browser/browser_main_loop.h"  // nogncheck
 #include "content/public/browser/browser_child_process_host_delegate.h"
@@ -67,6 +68,7 @@
 #include "ui/base/idle/idle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/color/color_provider_manager.h"
 
 #if defined(USE_AURA)
 #include "ui/display/display.h"
@@ -77,12 +79,13 @@
 
 #if BUILDFLAG(IS_LINUX)
 #include "base/environment.h"
+#include "chrome/browser/ui/views/dark_mode_manager_linux.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "device/bluetooth/dbus/dbus_bluez_manager_wrapper_linux.h"
 #include "electron/electron_gtk_stubs.h"
 #include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
-#include "ui/gfx/color_utils.h"
 #include "ui/gtk/gtk_compat.h"  // nogncheck
 #include "ui/gtk/gtk_util.h"    // nogncheck
 #include "ui/linux/linux_ui.h"
@@ -93,7 +96,6 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/display/win/dpi.h"
 #include "ui/gfx/system_fonts_win.h"
 #include "ui/strings/grit/app_locale_settings.h"
 #endif
@@ -147,13 +149,6 @@ void Erase(T* container, typename T::iterator iter) {
 }
 
 #if BUILDFLAG(IS_WIN)
-// gfx::Font callbacks
-void AdjustUIFont(gfx::win::FontAdjustment* font_adjustment) {
-  l10n_util::NeedOverrideDefaultUIFont(&font_adjustment->font_family_override,
-                                       &font_adjustment->font_scale);
-  font_adjustment->font_scale *= display::win::GetAccessibilityFontScale();
-}
-
 int GetMinimumFontSize() {
   int min_font_size;
   base::StringToInt(l10n_util::GetStringUTF16(IDS_MINIMUM_UI_FONT_SIZE),
@@ -175,58 +170,18 @@ std::u16string MediaStringProvider(media::MessageId id) {
   }
 }
 
-#if BUILDFLAG(IS_LINUX)
-// GTK does not provide a way to check if current theme is dark, so we compare
-// the text and background luminosity to get a result.
-// This trick comes from FireFox.
-void UpdateDarkThemeSetting() {
-  float bg = color_utils::GetRelativeLuminance(gtk::GetBgColor("GtkLabel"));
-  float fg = color_utils::GetRelativeLuminance(gtk::GetFgColor("GtkLabel"));
-  bool is_dark = fg > bg;
-  // Pass it to NativeUi theme, which is used by the nativeTheme module and most
-  // places in Electron.
-  ui::NativeTheme::GetInstanceForNativeUi()->set_use_dark_colors(is_dark);
-  // Pass it to Web Theme, to make "prefers-color-scheme" media query work.
-  ui::NativeTheme::GetInstanceForWeb()->set_use_dark_colors(is_dark);
-}
-#endif
-
-// A fake BrowserProcess object that used to feed the source code from chrome.
-class FakeBrowserProcessImpl : public BrowserProcessImpl {
- public:
-  embedder_support::OriginTrialsSettingsStorage*
-  GetOriginTrialsSettingsStorage() override {
-    return &origin_trials_settings_storage_;
-  }
-
- private:
-  embedder_support::OriginTrialsSettingsStorage origin_trials_settings_storage_;
-};
-
 }  // namespace
-
-#if BUILDFLAG(IS_LINUX)
-class DarkThemeObserver : public ui::NativeThemeObserver {
- public:
-  DarkThemeObserver() = default;
-
-  // ui::NativeThemeObserver:
-  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override {
-    UpdateDarkThemeSetting();
-  }
-};
-#endif
 
 // static
 ElectronBrowserMainParts* ElectronBrowserMainParts::self_ = nullptr;
 
 ElectronBrowserMainParts::ElectronBrowserMainParts()
     : fake_browser_process_(std::make_unique<BrowserProcessImpl>()),
-      browser_(std::make_unique<Browser>()),
-      node_bindings_(
-          NodeBindings::Create(NodeBindings::BrowserEnvironment::kBrowser)),
-      electron_bindings_(
-          std::make_unique<ElectronBindings>(node_bindings_->uv_loop())) {
+      node_bindings_{
+          NodeBindings::Create(NodeBindings::BrowserEnvironment::kBrowser)},
+      electron_bindings_{
+          std::make_unique<ElectronBindings>(node_bindings_->uv_loop())},
+      browser_{std::make_unique<Browser>()} {
   DCHECK(!self_) << "Cannot have two ElectronBrowserMainParts";
   self_ = this;
 }
@@ -284,26 +239,25 @@ void ElectronBrowserMainParts::PostEarlyInitialization() {
 
   node_bindings_->Initialize(js_env_->isolate()->GetCurrentContext());
   // Create the global environment.
-  node::Environment* env = node_bindings_->CreateEnvironment(
+  node_env_ = node_bindings_->CreateEnvironment(
       js_env_->isolate()->GetCurrentContext(), js_env_->platform());
-  node_env_ = std::make_unique<NodeEnvironment>(env);
 
-  env->set_trace_sync_io(env->options()->trace_sync_io);
+  node_env_->set_trace_sync_io(node_env_->options()->trace_sync_io);
 
   // We do not want to crash the main process on unhandled rejections.
-  env->options()->unhandled_rejections = "warn-with-error-code";
+  node_env_->options()->unhandled_rejections = "warn-with-error-code";
 
   // Add Electron extended APIs.
-  electron_bindings_->BindTo(js_env_->isolate(), env->process_object());
+  electron_bindings_->BindTo(js_env_->isolate(), node_env_->process_object());
 
   // Create explicit microtasks runner.
   js_env_->CreateMicrotasksRunner();
 
   // Wrap the uv loop with global env.
-  node_bindings_->set_uv_env(env);
+  node_bindings_->set_uv_env(node_env_.get());
 
   // Load everything.
-  node_bindings_->LoadEnvironment(env);
+  node_bindings_->LoadEnvironment(node_env_.get());
 
   // We already initialized the feature list in PreEarlyInitialization(), but
   // the user JS script would not have had a chance to alter the command-line
@@ -451,17 +405,10 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
   CHECK(electron::IsElectron_gdk_pixbufInitialized())
       << "Failed to initialize libgdk_pixbuf-2.0.so.0";
 
-  // Chromium does not respect GTK dark theme setting, but they may change
-  // in future and this code might be no longer needed. Check the Chromium
-  // issue to keep updated:
-  // https://bugs.chromium.org/p/chromium/issues/detail?id=998903
-  UpdateDarkThemeSetting();
-  // Update the native theme when GTK theme changes. The GetNativeTheme
-  // here returns a NativeThemeGtk, which monitors GTK settings.
-  dark_theme_observer_ = std::make_unique<DarkThemeObserver>();
-  auto* linux_ui_theme = ui::LinuxUiTheme::GetForProfile(nullptr);
-  CHECK(linux_ui_theme);
-  linux_ui_theme->GetNativeTheme()->AddObserver(dark_theme_observer_.get());
+  // source theme changes from system settings, including settings portal:
+  // https://flatpak.github.io/xdg-desktop-portal/#gdbus-org.freedesktop.portal.Settings
+  dark_mode_manager_ = std::make_unique<ui::DarkModeManagerLinux>();
+
   ui::LinuxUi::SetInstance(linux_ui);
 
   // Cursor theme changes are tracked by LinuxUI (via a CursorThemeManager
@@ -474,7 +421,7 @@ void ElectronBrowserMainParts::ToolkitInitialized() {
 #endif
 
 #if BUILDFLAG(IS_WIN)
-  gfx::win::SetAdjustFontCallback(&AdjustUIFont);
+  gfx::win::SetAdjustFontCallback(&l10n_util::AdjustUiFont);
   gfx::win::SetGetMinimumFontSizeCallback(&GetMinimumFontSize);
 #endif
 
@@ -559,7 +506,8 @@ void ElectronBrowserMainParts::PostCreateMainMessageLoop() {
   ui::OzonePlatform::GetInstance()->PostCreateMainMessageLoop(
       std::move(shutdown_cb),
       content::GetUIThreadTaskRunner({content::BrowserTaskType::kUserInput}));
-  bluez::DBusBluezManagerWrapperLinux::Initialize();
+  if (!bluez::BluezDBusManager::IsInitialized())
+    bluez::DBusBluezManagerWrapperLinux::Initialize();
 
   // Set up crypt config. This needs to be done before anything starts the
   // network service, as the raw encryption key needs to be shared with the
@@ -577,6 +525,15 @@ void ElectronBrowserMainParts::PostCreateMainMessageLoop() {
   config->should_use_preference =
       command_line.HasSwitch(::switches::kEnableEncryptionSelection);
   base::PathService::Get(DIR_SESSION_DATA, &config->user_data_path);
+
+  bool use_backend = !config->should_use_preference ||
+                     os_crypt::GetBackendUse(config->user_data_path);
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  base::nix::DesktopEnvironment desktop_env =
+      base::nix::GetDesktopEnvironment(env.get());
+  os_crypt::SelectedLinuxBackend selected_backend =
+      os_crypt::SelectBackend(config->store, use_backend, desktop_env);
+  fake_browser_process_->SetLinuxStorageBackend(selected_backend);
   OSCrypt::SetConfig(std::move(config));
 #endif
 #if BUILDFLAG(IS_MAC)
@@ -636,9 +593,9 @@ void ElectronBrowserMainParts::PostMainMessageLoopRun() {
 
   // Destroy node platform after all destructors_ are executed, as they may
   // invoke Node/V8 APIs inside them.
-  node_env_->env()->set_trace_sync_io(false);
+  node_env_->set_trace_sync_io(false);
   js_env_->DestroyMicrotasksRunner();
-  node::Stop(node_env_->env(), node::StopFlags::kDoNotTerminateIsolate);
+  node::Stop(node_env_.get(), node::StopFlags::kDoNotTerminateIsolate);
   node_env_.reset();
 
   auto default_context_key = ElectronBrowserContext::PartitionKey("", false);

@@ -14,6 +14,10 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace electron {
 
 int ScopedDisableResize::disable_resize_ = 0;
@@ -248,7 +252,7 @@ void SwizzleSwipeWithEvent(NSView* view, SEL swiz_selector) {
                                        @"NSAccessibilityReparentingCellProxy"];
 
   NSArray* children = [super accessibilityAttributeValue:attribute];
-  NSMutableArray* mutableChildren = [[children mutableCopy] autorelease];
+  NSMutableArray* mutableChildren = [children mutableCopy];
   [mutableChildren filterUsingPredicate:predicate];
 
   return mutableChildren;
@@ -334,7 +338,10 @@ void SwizzleSwipeWithEvent(NSView* view, SEL swiz_selector) {
   }
 }
 
-- (void)toggleFullScreenMode:(id)sender {
+- (BOOL)toggleFullScreenMode:(id)sender {
+  if (!shell_->has_frame() && !shell_->HasStyleMask(NSWindowStyleMaskTitled))
+    return NO;
+
   bool is_simple_fs = shell_->IsSimpleFullScreen();
   bool always_simple_fs = shell_->always_simple_fullscreen();
 
@@ -363,6 +370,8 @@ void SwizzleSwipeWithEvent(NSView* view, SEL swiz_selector) {
     bool maximizable = shell_->IsMaximizable();
     shell_->SetMaximizable(maximizable);
   }
+
+  return YES;
 }
 
 - (void)performMiniaturize:(id)sender {

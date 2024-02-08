@@ -13,6 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "include/core/SkColor.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/native_window_features.h"
 #include "shell/browser/ui/drag_util.h"
@@ -98,6 +99,11 @@ NativeWindow::NativeWindow(const gin_helper::Dictionary& options,
   options.Get(options::kTransparent, &transparent_);
   options.Get(options::kEnableLargerThanScreen, &enable_larger_than_screen_);
   options.Get(options::kTitleBarStyle, &title_bar_style_);
+#if BUILDFLAG(IS_WIN)
+  options.Get(options::kBackgroundMaterial, &background_material_);
+#elif BUILDFLAG(IS_MAC)
+  options.Get(options::kVibrancyType, &vibrancy_);
+#endif
 
   v8::Local<v8::Value> titlebar_overlay;
   if (options.Get(options::ktitleBarOverlay, &titlebar_overlay)) {
@@ -198,10 +204,6 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
     SetSizeConstraints(size_constraints);
   }
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
-  bool resizable;
-  if (options.Get(options::kResizable, &resizable)) {
-    SetResizable(resizable);
-  }
   bool closable;
   if (options.Get(options::kClosable, &closable)) {
     SetClosable(closable);
@@ -223,6 +225,7 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
   if (options.Get(options::kAlwaysOnTop, &top) && top) {
     SetAlwaysOnTop(ui::ZOrderLevel::kFloatingWindow);
   }
+
   bool fullscreenable = true;
   bool fullscreen = false;
   if (options.Get(options::kFullscreen, &fullscreen) && !fullscreen) {
@@ -231,12 +234,18 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
     fullscreenable = false;
 #endif
   }
-  // Overridden by 'fullscreenable'.
+
   options.Get(options::kFullScreenable, &fullscreenable);
   SetFullScreenable(fullscreenable);
-  if (fullscreen) {
+
+  if (fullscreen)
     SetFullScreen(true);
+
+  bool resizable;
+  if (options.Get(options::kResizable, &resizable)) {
+    SetResizable(resizable);
   }
+
   bool skip;
   if (options.Get(options::kSkipTaskbar, &skip)) {
     SetSkipTaskbar(skip);
@@ -256,13 +265,15 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
     SetBackgroundMaterial(material);
   }
 #endif
-  std::string color;
-  if (options.Get(options::kBackgroundColor, &color)) {
-    SetBackgroundColor(ParseCSSColor(color));
-  } else if (!transparent()) {
-    // For normal window, use white as default background.
-    SetBackgroundColor(SK_ColorWHITE);
+
+  SkColor background_color = SK_ColorWHITE;
+  if (std::string color; options.Get(options::kBackgroundColor, &color)) {
+    background_color = ParseCSSColor(color);
+  } else if (IsTranslucent()) {
+    background_color = SK_ColorTRANSPARENT;
   }
+  SetBackgroundColor(background_color);
+
   std::string title(Browser::Get()->GetName());
   options.Get(options::kTitle, &title);
   SetTitle(title);
@@ -316,47 +327,69 @@ bool NativeWindow::IsNormal() {
 
 void NativeWindow::SetSizeConstraints(
     const extensions::SizeConstraints& window_constraints) {
-  extensions::SizeConstraints content_constraints(GetContentSizeConstraints());
-  if (window_constraints.HasMaximumSize()) {
-    gfx::Rect max_bounds = WindowBoundsToContentBounds(
-        gfx::Rect(window_constraints.GetMaximumSize()));
-    content_constraints.set_maximum_size(max_bounds.size());
-  }
-  if (window_constraints.HasMinimumSize()) {
-    gfx::Rect min_bounds = WindowBoundsToContentBounds(
-        gfx::Rect(window_constraints.GetMinimumSize()));
-    content_constraints.set_minimum_size(min_bounds.size());
-  }
-  SetContentSizeConstraints(content_constraints);
+  size_constraints_ = window_constraints;
+  content_size_constraints_.reset();
 }
 
 extensions::SizeConstraints NativeWindow::GetSizeConstraints() const {
-  extensions::SizeConstraints content_constraints = GetContentSizeConstraints();
-  extensions::SizeConstraints window_constraints;
-  if (content_constraints.HasMaximumSize()) {
+  if (size_constraints_)
+    return *size_constraints_;
+  if (!content_size_constraints_)
+    return extensions::SizeConstraints();
+  // Convert content size constraints to window size constraints.
+  extensions::SizeConstraints constraints;
+  if (content_size_constraints_->HasMaximumSize()) {
     gfx::Rect max_bounds = ContentBoundsToWindowBounds(
-        gfx::Rect(content_constraints.GetMaximumSize()));
-    window_constraints.set_maximum_size(max_bounds.size());
+        gfx::Rect(content_size_constraints_->GetMaximumSize()));
+    constraints.set_maximum_size(max_bounds.size());
   }
-  if (content_constraints.HasMinimumSize()) {
+  if (content_size_constraints_->HasMinimumSize()) {
     gfx::Rect min_bounds = ContentBoundsToWindowBounds(
-        gfx::Rect(content_constraints.GetMinimumSize()));
-    window_constraints.set_minimum_size(min_bounds.size());
+        gfx::Rect(content_size_constraints_->GetMinimumSize()));
+    constraints.set_minimum_size(min_bounds.size());
   }
-  return window_constraints;
+  return constraints;
 }
 
 void NativeWindow::SetContentSizeConstraints(
     const extensions::SizeConstraints& size_constraints) {
-  size_constraints_ = size_constraints;
+  content_size_constraints_ = size_constraints;
+  size_constraints_.reset();
 }
 
+// Windows/Linux:
+// The return value of GetContentSizeConstraints will be passed to Chromium
+// to set min/max sizes of window. Note that we are returning content size
+// instead of window size because that is what Chromium expects, see the
+// comment of |WidgetSizeIsClientSize| in Chromium's codebase to learn more.
+//
+// macOS:
+// The min/max sizes are set directly by calling NSWindow's methods.
 extensions::SizeConstraints NativeWindow::GetContentSizeConstraints() const {
-  return size_constraints_;
+  if (content_size_constraints_)
+    return *content_size_constraints_;
+  if (!size_constraints_)
+    return extensions::SizeConstraints();
+  // Convert window size constraints to content size constraints.
+  // Note that we are not caching the results, because Chromium reccalculates
+  // window frame size everytime when min/max sizes are passed, and we must
+  // do the same otherwise the resulting size with frame included will be wrong.
+  extensions::SizeConstraints constraints;
+  if (size_constraints_->HasMaximumSize()) {
+    gfx::Rect max_bounds = WindowBoundsToContentBounds(
+        gfx::Rect(size_constraints_->GetMaximumSize()));
+    constraints.set_maximum_size(max_bounds.size());
+  }
+  if (size_constraints_->HasMinimumSize()) {
+    gfx::Rect min_bounds = WindowBoundsToContentBounds(
+        gfx::Rect(size_constraints_->GetMinimumSize()));
+    constraints.set_minimum_size(min_bounds.size());
+  }
+  return constraints;
 }
 
 void NativeWindow::SetMinimumSize(const gfx::Size& size) {
-  extensions::SizeConstraints size_constraints;
+  extensions::SizeConstraints size_constraints = GetSizeConstraints();
   size_constraints.set_minimum_size(size);
   SetSizeConstraints(size_constraints);
 }
@@ -366,7 +399,7 @@ gfx::Size NativeWindow::GetMinimumSize() const {
 }
 
 void NativeWindow::SetMaximumSize(const gfx::Size& size) {
-  extensions::SizeConstraints size_constraints;
+  extensions::SizeConstraints size_constraints = GetSizeConstraints();
   size_constraints.set_maximum_size(size);
   SetSizeConstraints(size_constraints);
 }
@@ -439,6 +472,8 @@ void NativeWindow::SelectPreviousTab() {}
 
 void NativeWindow::SelectNextTab() {}
 
+void NativeWindow::ShowAllTabs() {}
+
 void NativeWindow::MergeAllWindows() {}
 
 void NativeWindow::MoveTabToNewWindow() {}
@@ -449,9 +484,17 @@ bool NativeWindow::AddTabbedWindow(NativeWindow* window) {
   return true;  // for non-Mac platforms
 }
 
-void NativeWindow::SetVibrancy(const std::string& type) {}
+absl::optional<std::string> NativeWindow::GetTabbingIdentifier() const {
+  return "";  // for non-Mac platforms
+}
 
-void NativeWindow::SetBackgroundMaterial(const std::string& type) {}
+void NativeWindow::SetVibrancy(const std::string& type) {
+  vibrancy_ = type;
+}
+
+void NativeWindow::SetBackgroundMaterial(const std::string& type) {
+  background_material_ = type;
+}
 
 void NativeWindow::SetTouchBar(
     std::vector<gin_helper::PersistentDictionary> items) {}
@@ -492,7 +535,7 @@ void NativeWindow::PreviewFile(const std::string& path,
 
 void NativeWindow::CloseFilePreview() {}
 
-gfx::Rect NativeWindow::GetWindowControlsOverlayRect() {
+absl::optional<gfx::Rect> NativeWindow::GetWindowControlsOverlayRect() {
   return overlay_rect_;
 }
 
@@ -620,6 +663,7 @@ void NativeWindow::NotifyWindowMoved() {
 }
 
 void NativeWindow::NotifyWindowEnterFullScreen() {
+  NotifyLayoutWindowControlsOverlay();
   for (NativeWindowObserver& observer : observers_)
     observer.OnWindowEnterFullScreen();
 }
@@ -645,6 +689,7 @@ void NativeWindow::NotifyWindowSheetEnd() {
 }
 
 void NativeWindow::NotifyWindowLeaveFullScreen() {
+  NotifyLayoutWindowControlsOverlay();
   for (NativeWindowObserver& observer : observers_)
     observer.OnWindowLeaveFullScreen();
 }
@@ -688,10 +733,10 @@ void NativeWindow::NotifyWindowSystemContextMenu(int x,
 }
 
 void NativeWindow::NotifyLayoutWindowControlsOverlay() {
-  gfx::Rect bounding_rect = GetWindowControlsOverlayRect();
-  if (!bounding_rect.IsEmpty()) {
+  auto bounding_rect = GetWindowControlsOverlayRect();
+  if (bounding_rect.has_value()) {
     for (NativeWindowObserver& observer : observers_)
-      observer.UpdateWindowControlsOverlay(bounding_rect);
+      observer.UpdateWindowControlsOverlay(bounding_rect.value());
   }
 }
 
@@ -774,6 +819,30 @@ void NativeWindow::HandlePendingFullscreenTransitions() {
 
 // static
 int32_t NativeWindow::next_id_ = 0;
+
+bool NativeWindow::IsTranslucent() const {
+  // Transparent windows are translucent
+  if (transparent()) {
+    return true;
+  }
+
+#if BUILDFLAG(IS_MAC)
+  // Windows with vibrancy set are translucent
+  if (!vibrancy().empty()) {
+    return true;
+  }
+#endif
+
+#if BUILDFLAG(IS_WIN)
+  // Windows with certain background materials may be translucent
+  const std::string& bg_material = background_material();
+  if (!bg_material.empty() && bg_material != "none") {
+    return true;
+  }
+#endif
+
+  return false;
+}
 
 // static
 void NativeWindowRelay::CreateForWebContents(

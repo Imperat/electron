@@ -61,12 +61,10 @@ void InvokeIpcCallback(v8::Local<v8::Context> context,
 
   // Only set up the node::CallbackScope if there's a node environment.
   // Sandboxed renderers don't have a node environment.
-  node::Environment* env = node::Environment::GetCurrent(context);
   std::unique_ptr<node::CallbackScope> callback_scope;
-  if (env) {
-    node::async_context async_context = {};
-    callback_scope = std::make_unique<node::CallbackScope>(isolate, ipcNative,
-                                                           async_context);
+  if (node::Environment::GetCurrent(context)) {
+    callback_scope = std::make_unique<node::CallbackScope>(
+        isolate, ipcNative, node::async_context{0, 0});
   }
 
   auto callback_key = gin::ConvertToV8(isolate, callback_name)
@@ -83,7 +81,8 @@ void EmitIPCEvent(v8::Local<v8::Context> context,
                   const std::string& channel,
                   std::vector<v8::Local<v8::Value>> ports,
                   v8::Local<v8::Value> args,
-                  int32_t sender_id) {
+                  int32_t sender_id = 0,
+                  bool sender_is_main_frame = false) {
   auto* isolate = context->GetIsolate();
 
   v8::HandleScope handle_scope(isolate);
@@ -92,9 +91,12 @@ void EmitIPCEvent(v8::Local<v8::Context> context,
                                    v8::MicrotasksScope::kRunMicrotasks);
 
   std::vector<v8::Local<v8::Value>> argv = {
-      gin::ConvertToV8(isolate, internal), gin::ConvertToV8(isolate, channel),
-      gin::ConvertToV8(isolate, ports), args,
-      gin::ConvertToV8(isolate, sender_id)};
+      gin::ConvertToV8(isolate, internal),
+      gin::ConvertToV8(isolate, channel),
+      gin::ConvertToV8(isolate, ports),
+      args,
+      gin::ConvertToV8(isolate, sender_id),
+      gin::ConvertToV8(isolate, sender_is_main_frame)};
 
   InvokeIpcCallback(context, "onMessage", argv);
 }
@@ -157,7 +159,8 @@ void ElectronApiServiceImpl::OnConnectionError() {
 void ElectronApiServiceImpl::Message(bool internal,
                                      const std::string& channel,
                                      blink::CloneableMessage arguments,
-                                     int32_t sender_id) {
+                                     int32_t sender_id,
+                                     bool sender_is_main_frame) {
   blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
   if (!frame)
     return;
@@ -170,7 +173,8 @@ void ElectronApiServiceImpl::Message(bool internal,
 
   v8::Local<v8::Value> args = gin::ConvertToV8(isolate, arguments);
 
-  EmitIPCEvent(context, internal, channel, {}, args, sender_id);
+  EmitIPCEvent(context, internal, channel, {}, args, sender_id,
+               sender_is_main_frame);
 }
 
 void ElectronApiServiceImpl::ReceivePostMessage(
@@ -197,8 +201,7 @@ void ElectronApiServiceImpl::ReceivePostMessage(
 
   std::vector<v8::Local<v8::Value>> args = {message_value};
 
-  EmitIPCEvent(context, false, channel, ports, gin::ConvertToV8(isolate, args),
-               0);
+  EmitIPCEvent(context, false, channel, ports, gin::ConvertToV8(isolate, args));
 }
 
 void ElectronApiServiceImpl::TakeHeapSnapshot(

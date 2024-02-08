@@ -22,7 +22,8 @@ class ProtocolRegistry;
 
 namespace api {
 
-std::vector<std::string> GetStandardSchemes();
+const std::vector<std::string>& GetStandardSchemes();
+const std::vector<std::string>& GetCodeCacheSchemes();
 
 void AddServiceWorkerScheme(const std::string& scheme);
 
@@ -45,13 +46,15 @@ class Protocol : public gin::Wrappable<Protocol>,
   static gin::Handle<Protocol> Create(v8::Isolate* isolate,
                                       ElectronBrowserContext* browser_context);
 
+  // gin_helper::Constructible
   static gin::Handle<Protocol> New(gin_helper::ErrorThrower thrower);
-
-  // gin::Wrappable
-  static gin::WrapperInfo kWrapperInfo;
   static v8::Local<v8::ObjectTemplate> FillObjectTemplate(
       v8::Isolate* isolate,
       v8::Local<v8::ObjectTemplate> tmpl);
+  static const char* GetClassName() { return "Protocol"; }
+
+  // gin::Wrappable
+  static gin::WrapperInfo kWrapperInfo;
   const char* GetTypeName() override;
 
  private:

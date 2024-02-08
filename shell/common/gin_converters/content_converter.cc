@@ -8,8 +8,8 @@
 
 #include "base/containers/fixed_flat_map.h"
 #include "content/public/browser/context_menu_params.h"
-#include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/input/native_web_keyboard_event.h"
 #include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/web_contents_permission_helper.h"
 #include "shell/common/gin_converters/blink_converter.h"
@@ -24,36 +24,81 @@
 
 namespace gin {
 
-template <>
-struct Converter<ui::MenuSourceType> {
-  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
-                                   const ui::MenuSourceType& in) {
-    switch (in) {
-      case ui::MENU_SOURCE_MOUSE:
-        return StringToV8(isolate, "mouse");
-      case ui::MENU_SOURCE_KEYBOARD:
-        return StringToV8(isolate, "keyboard");
-      case ui::MENU_SOURCE_TOUCH:
-        return StringToV8(isolate, "touch");
-      case ui::MENU_SOURCE_TOUCH_EDIT_MENU:
-        return StringToV8(isolate, "touchMenu");
-      case ui::MENU_SOURCE_LONG_PRESS:
-        return StringToV8(isolate, "longPress");
-      case ui::MENU_SOURCE_LONG_TAP:
-        return StringToV8(isolate, "longTap");
-      case ui::MENU_SOURCE_TOUCH_HANDLE:
-        return StringToV8(isolate, "touchHandle");
-      case ui::MENU_SOURCE_STYLUS:
-        return StringToV8(isolate, "stylus");
-      case ui::MENU_SOURCE_ADJUST_SELECTION:
-        return StringToV8(isolate, "adjustSelection");
-      case ui::MENU_SOURCE_ADJUST_SELECTION_RESET:
-        return StringToV8(isolate, "adjustSelectionReset");
-      default:
-        return StringToV8(isolate, "none");
-    }
+// static
+v8::Local<v8::Value> Converter<ui::MenuSourceType>::ToV8(
+    v8::Isolate* isolate,
+    const ui::MenuSourceType& in) {
+  switch (in) {
+    case ui::MENU_SOURCE_MOUSE:
+      return StringToV8(isolate, "mouse");
+    case ui::MENU_SOURCE_KEYBOARD:
+      return StringToV8(isolate, "keyboard");
+    case ui::MENU_SOURCE_TOUCH:
+      return StringToV8(isolate, "touch");
+    case ui::MENU_SOURCE_TOUCH_EDIT_MENU:
+      return StringToV8(isolate, "touchMenu");
+    case ui::MENU_SOURCE_LONG_PRESS:
+      return StringToV8(isolate, "longPress");
+    case ui::MENU_SOURCE_LONG_TAP:
+      return StringToV8(isolate, "longTap");
+    case ui::MENU_SOURCE_TOUCH_HANDLE:
+      return StringToV8(isolate, "touchHandle");
+    case ui::MENU_SOURCE_STYLUS:
+      return StringToV8(isolate, "stylus");
+    case ui::MENU_SOURCE_ADJUST_SELECTION:
+      return StringToV8(isolate, "adjustSelection");
+    case ui::MENU_SOURCE_ADJUST_SELECTION_RESET:
+      return StringToV8(isolate, "adjustSelectionReset");
+    case ui::MENU_SOURCE_NONE:
+      return StringToV8(isolate, "none");
   }
-};
+}
+
+// static
+bool Converter<ui::MenuSourceType>::FromV8(v8::Isolate* isolate,
+                                           v8::Local<v8::Value> val,
+                                           ui::MenuSourceType* out) {
+  std::string type;
+  if (!ConvertFromV8(isolate, val, &type))
+    return false;
+
+  if (type == "mouse") {
+    *out = ui::MENU_SOURCE_MOUSE;
+    return true;
+  } else if (type == "keyboard") {
+    *out = ui::MENU_SOURCE_KEYBOARD;
+    return true;
+  } else if (type == "touch") {
+    *out = ui::MENU_SOURCE_TOUCH;
+    return true;
+  } else if (type == "touchMenu") {
+    *out = ui::MENU_SOURCE_TOUCH_EDIT_MENU;
+    return true;
+  } else if (type == "longPress") {
+    *out = ui::MENU_SOURCE_LONG_PRESS;
+    return true;
+  } else if (type == "longTap") {
+    *out = ui::MENU_SOURCE_LONG_TAP;
+    return true;
+  } else if (type == "touchHandle") {
+    *out = ui::MENU_SOURCE_TOUCH_HANDLE;
+    return true;
+  } else if (type == "stylus") {
+    *out = ui::MENU_SOURCE_STYLUS;
+    return true;
+  } else if (type == "adjustSelection") {
+    *out = ui::MENU_SOURCE_ADJUST_SELECTION;
+    return true;
+  } else if (type == "adjustSelectionReset") {
+    *out = ui::MENU_SOURCE_ADJUST_SELECTION_RESET;
+    return true;
+  } else if (type == "none") {
+    *out = ui::MENU_SOURCE_NONE;
+    return true;
+  }
+
+  return false;
+}
 
 // static
 v8::Local<v8::Value> Converter<blink::mojom::MenuItem::Type>::ToV8(
@@ -204,6 +249,8 @@ v8::Local<v8::Value> Converter<blink::PermissionType>::ToV8(
   switch (static_cast<PermissionType>(val)) {
     case PermissionType::POINTER_LOCK:
       return StringToV8(isolate, "pointerLock");
+    case PermissionType::KEYBOARD_LOCK:
+      return StringToV8(isolate, "keyboardLock");
     case PermissionType::FULLSCREEN:
       return StringToV8(isolate, "fullscreen");
     case PermissionType::OPEN_EXTERNAL:
@@ -297,7 +344,7 @@ bool Converter<content::NativeWebKeyboardEvent>::FromV8(
     return false;
   if (!ConvertFromV8(isolate, val, static_cast<blink::WebKeyboardEvent*>(out)))
     return false;
-  dict.Get("skipInBrowser", &out->skip_in_browser);
+  dict.Get("skipIfUnhandled", &out->skip_if_unhandled);
   return true;
 }
 

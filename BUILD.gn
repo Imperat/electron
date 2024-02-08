@@ -37,7 +37,7 @@ if (is_mac) {
   import("build/rules.gni")
 
   assert(
-      mac_deployment_target == "10.13",
+      mac_deployment_target == "10.15",
       "Chromium has updated the mac_deployment_target, please update this assert, update the supported versions documentation (docs/tutorial/support.md) and flag this as a breaking change")
 }
 
@@ -103,14 +103,26 @@ branding = read_file("shell/app/BRANDING.json", "json")
 electron_project_name = branding.project_name
 electron_product_name = branding.product_name
 electron_mac_bundle_id = branding.mac_bundle_id
-electron_version = exec_script("script/print-version.py",
-                               [],
-                               "trim string",
-                               [
-                                 ".git/packed-refs",
-                                 ".git/HEAD",
-                                 "script/lib/get-version.js",
-                               ])
+
+if (override_electron_version != "") {
+  electron_version = override_electron_version
+} else {
+  # When building from source code tarball there is no git tag available and
+  # builders must explicitly pass override_electron_version in gn args.
+  # This read_file call will assert if there is no git information, without it
+  # gn will generate a malformed build configuration and ninja will get into
+  # infinite loop.
+  read_file(".git/packed-refs", "string")
+
+  # Set electron version from git tag.
+  electron_version = exec_script("script/get-git-version.py",
+                                 [],
+                                 "trim string",
+                                 [
+                                   ".git/packed-refs",
+                                   ".git/HEAD",
+                                 ])
+}
 
 if (is_mas_build) {
   assert(is_mac,
@@ -150,15 +162,6 @@ npm_action("build_electron_definitions") {
   inputs = auto_filenames.api_docs + [ "yarn.lock" ]
 
   outputs = [ "$target_gen_dir/tsc/typings/electron.d.ts" ]
-}
-
-webpack_build("electron_asar_bundle") {
-  deps = [ ":build_electron_definitions" ]
-
-  inputs = auto_filenames.asar_bundle_deps
-
-  config_file = "//electron/build/webpack/webpack.config.asar.js"
-  out_file = "$target_gen_dir/js2c/asar_bundle.js"
 }
 
 webpack_build("electron_browser_bundle") {
@@ -206,6 +209,15 @@ webpack_build("electron_isolated_renderer_bundle") {
   out_file = "$target_gen_dir/js2c/isolated_bundle.js"
 }
 
+webpack_build("electron_node_bundle") {
+  deps = [ ":build_electron_definitions" ]
+
+  inputs = auto_filenames.node_bundle_deps
+
+  config_file = "//electron/build/webpack/webpack.config.node.js"
+  out_file = "$target_gen_dir/js2c/node_init.js"
+}
+
 webpack_build("electron_utility_bundle") {
   deps = [ ":build_electron_definitions" ]
 
@@ -217,9 +229,9 @@ webpack_build("electron_utility_bundle") {
 
 action("electron_js2c") {
   deps = [
-    ":electron_asar_bundle",
     ":electron_browser_bundle",
     ":electron_isolated_renderer_bundle",
+    ":electron_node_bundle",
     ":electron_renderer_bundle",
     ":electron_sandboxed_renderer_bundle",
     ":electron_utility_bundle",
@@ -227,9 +239,9 @@ action("electron_js2c") {
   ]
 
   sources = [
-    "$target_gen_dir/js2c/asar_bundle.js",
     "$target_gen_dir/js2c/browser_init.js",
     "$target_gen_dir/js2c/isolated_bundle.js",
+    "$target_gen_dir/js2c/node_init.js",
     "$target_gen_dir/js2c/renderer_init.js",
     "$target_gen_dir/js2c/sandbox_bundle.js",
     "$target_gen_dir/js2c/utility_init.js",
@@ -730,8 +742,8 @@ source_set("electron_lib") {
       "//pdf",
     ]
     sources += [
-      "shell/browser/electron_pdf_web_contents_helper_client.cc",
-      "shell/browser/electron_pdf_web_contents_helper_client.h",
+      "shell/browser/electron_pdf_document_helper_client.cc",
+      "shell/browser/electron_pdf_document_helper_client.h",
       "shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.cc",
       "shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.h",
     ]
@@ -746,22 +758,58 @@ source_set("electron_lib") {
 
 if (is_mac) {
   source_set("electron_lib_arc") {
+    public_configs = [ ":branding" ]
     include_dirs = [ "." ]
     sources = [
+      "shell/app/electron_main_delegate_mac.h",
+      "shell/app/electron_main_delegate_mac.mm",
+      "shell/browser/api/electron_api_menu_mac.h",
+      "shell/browser/api/electron_api_menu_mac.mm",
+      "shell/browser/api/electron_api_native_theme_mac.mm",
+      "shell/browser/api/electron_api_push_notifications_mac.mm",
+      "shell/browser/api/electron_api_system_preferences_mac.mm",
+      "shell/browser/browser_mac.mm",
+      "shell/browser/electron_browser_main_parts_mac.mm",
       "shell/browser/mac/dict_util.h",
       "shell/browser/mac/dict_util.mm",
+      "shell/browser/mac/electron_application.h",
+      "shell/browser/mac/electron_application.mm",
       "shell/browser/mac/electron_application_delegate.h",
       "shell/browser/mac/electron_application_delegate.mm",
+      "shell/browser/native_window_mac.h",
+      "shell/browser/native_window_mac.mm",
+      "shell/browser/ui/cocoa/delayed_native_view_host.h",
+      "shell/browser/ui/cocoa/delayed_native_view_host.mm",
+      "shell/browser/ui/cocoa/electron_inspectable_web_contents_view.h",
+      "shell/browser/ui/cocoa/electron_inspectable_web_contents_view.mm",
+      "shell/browser/ui/cocoa/electron_menu_controller.mm",
+      "shell/browser/ui/cocoa/electron_ns_window.h",
+      "shell/browser/ui/cocoa/electron_ns_window.mm",
+      "shell/browser/ui/cocoa/electron_ns_window_delegate.h",
+      "shell/browser/ui/cocoa/electron_ns_window_delegate.mm",
+      "shell/browser/ui/cocoa/electron_touch_bar.h",
+      "shell/browser/ui/cocoa/electron_touch_bar.mm",
+      "shell/browser/ui/inspectable_web_contents_view_mac.h",
+      "shell/browser/ui/inspectable_web_contents_view_mac.mm",
+      "shell/browser/ui/tray_icon_cocoa.h",
+      "shell/browser/ui/tray_icon_cocoa.mm",
     ]
 
     deps = [
+      "buildflags",
+      "shell/common/api:mojo",
       "//base",
+      "//content/public/browser",
       "//skia",
       "//third_party/electron_node:node_lib",
+      "//third_party/webrtc_overrides:webrtc_component",
       "//v8",
     ]
 
-    configs += [ "//build/config/compiler:enable_arc" ]
+    configs += [
+      "//electron/build/config:mas_build",
+      "//third_party/electron_node:node_internals",
+    ]
   }
 }
 
@@ -927,13 +975,13 @@ if (is_mac) {
       output_name = electron_helper_name + invoker.helper_name_suffix
       deps = [
         ":electron_framework+link",
-        "//base/allocator:early_zone_registration_mac",
+        "//base/allocator:early_zone_registration_apple",
       ]
       if (!is_mas_build) {
         deps += [ "//sandbox/mac:seatbelt" ]
       }
       defines = [ "HELPER_EXECUTABLE" ]
-      extra_configs = [ "//electron/build/config:mas_build" ]
+      configs += [ "//electron/build/config:mas_build" ]
       sources = [
         "shell/app/electron_main_mac.cc",
         "shell/app/uv_stdio_fix.cc",
@@ -1089,7 +1137,7 @@ if (is_mac) {
       ":electron_app_plist",
       ":electron_app_resources",
       ":electron_fuses",
-      "//base/allocator:early_zone_registration_mac",
+      "//base/allocator:early_zone_registration_apple",
       "//electron/buildflags",
     ]
     if (is_mas_build) {
@@ -1104,7 +1152,7 @@ if (is_mac) {
       "-rpath",
       "@executable_path/../Frameworks",
     ]
-    extra_configs = [ "//electron/build/config:mas_build" ]
+    configs += [ "//electron/build/config:mas_build" ]
   }
 
   if (enable_dsyms) {
@@ -1498,8 +1546,9 @@ dist_zip("libcxx_headers_zip") {
   data_deps = [ ":libcxx_headers" ]
   deps = data_deps
   flatten = true
-  flatten_relative_to = rebase_path(
-          "$target_gen_dir/electron_libcxx_include/buildtools/third_party/libc++/trunk",
+  flatten_relative_to =
+      rebase_path(
+          "$target_gen_dir/electron_libcxx_include/third_party/libc++/src",
           "$root_out_dir")
 
   outputs = [ "$root_build_dir/libcxx_headers.zip" ]
@@ -1515,7 +1564,7 @@ dist_zip("libcxxabi_headers_zip") {
   deps = data_deps
   flatten = true
   flatten_relative_to = rebase_path(
-          "$target_gen_dir/electron_libcxxabi_include/buildtools/third_party/libc++abi/trunk",
+          "$target_gen_dir/electron_libcxxabi_include/third_party/libc++abi/src",
           "$root_out_dir")
 
   outputs = [ "$root_build_dir/libcxxabi_headers.zip" ]

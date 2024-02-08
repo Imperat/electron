@@ -112,7 +112,7 @@ The `src` attribute can also accept data URLs, such as
 ### `nodeintegration`
 
 ```html
-<webview src="http://www.google.com/" nodeintegration></webview>
+<webview src="https://www.google.com/" nodeintegration></webview>
 ```
 
 A `boolean`. When this attribute is present the guest page in `webview` will have node
@@ -123,7 +123,7 @@ page.
 ### `nodeintegrationinsubframes`
 
 ```html
-<webview src="http://www.google.com/" nodeintegrationinsubframes></webview>
+<webview src="https://www.google.com/" nodeintegrationinsubframes></webview>
 ```
 
 A `boolean` for the experimental option for enabling NodeJS support in sub-frames such as iframes
@@ -161,7 +161,7 @@ after this script has finished executing.
 ### `httpreferrer`
 
 ```html
-<webview src="https://www.github.com/" httpreferrer="http://cheng.guru"></webview>
+<webview src="https://www.github.com/" httpreferrer="https://example.com/"></webview>
 ```
 
 A `string` that sets the referrer URL for the guest page.
@@ -255,7 +255,7 @@ The `webview` tag has the following methods:
 
 **Example**
 
-```javascript @ts-expect-error=[3]
+```js @ts-expect-error=[3]
 const webview = document.querySelector('webview')
 webview.addEventListener('dom-ready', () => {
   webview.openDevTools()
@@ -280,9 +280,11 @@ if the page fails to load (see
 Loads the `url` in the webview, the `url` must contain the protocol prefix,
 e.g. the `http://` or `file://`.
 
-### `<webview>.downloadURL(url)`
+### `<webview>.downloadURL(url[, options])`
 
 * `url` string
+* `options` Object (optional)
+  * `headers` Record<string, string> (optional) - HTTP request headers.
 
 Initiates a download of the resource at `url` without navigating.
 
@@ -601,7 +603,7 @@ Prints `webview`'s web page. Same as `webContents.print([options])`.
     * `bottom` number (optional) - Bottom margin in inches. Defaults to 1cm (~0.4 inches).
     * `left` number (optional) - Left margin in inches. Defaults to 1cm (~0.4 inches).
     * `right` number (optional) - Right margin in inches. Defaults to 1cm (~0.4 inches).
-  * `pageRanges` string (optional) - Paper ranges to print, e.g., '1-5, 8, 11-13'. Defaults to the empty string, which means print all pages.
+  * `pageRanges` string (optional) - Page ranges to print, e.g., '1-5, 8, 11-13'. Defaults to the empty string, which means print all pages.
   * `headerTemplate` string (optional) - HTML template for the print header. Should be valid HTML markup with following classes used to inject printing values into them: `date` (formatted print date), `title` (document title), `url` (document location), `pageNumber` (current page number) and `totalPages` (total pages in the document). For example, `<span class=title></span>` would generate span containing the title.
   * `footerTemplate` string (optional) - HTML template for the print footer. Should use the same format as the `headerTemplate`.
   * `preferCSSPageSize` boolean (optional) - Whether or not to prefer page size as defined by css. Defaults to false, in which case the content will be scaled to fit the paper size.
@@ -799,7 +801,7 @@ Fired when the guest window logs a console message.
 The following example code forwards all log messages to the embedder's console
 without regard for log level or other properties.
 
-```javascript @ts-expect-error=[3]
+```js @ts-expect-error=[3]
 const webview = document.querySelector('webview')
 webview.addEventListener('console-message', (e) => {
   console.log('Guest page logged a message:', e.message)
@@ -820,7 +822,7 @@ Returns:
 Fired when a result is available for
 [`webview.findInPage`](#webviewfindinpagetext-options) request.
 
-```javascript @ts-expect-error=[3,6]
+```js @ts-expect-error=[3,6]
 const webview = document.querySelector('webview')
 webview.addEventListener('found-in-page', (e) => {
   webview.stopFindInPage('keepSelection')
@@ -945,7 +947,7 @@ Fired when the guest page attempts to close itself.
 The following example code navigates the `webview` to `about:blank` when the
 guest attempts to close itself.
 
-```javascript @ts-expect-error=[3]
+```js @ts-expect-error=[3]
 const webview = document.querySelector('webview')
 webview.addEventListener('close', () => {
   webview.src = 'about:blank'
@@ -965,7 +967,7 @@ Fired when the guest page has sent an asynchronous message to embedder page.
 With `sendToHost` method and `ipc-message` event you can communicate
 between guest page and embedder page:
 
-```javascript @ts-expect-error=[4,7]
+```js @ts-expect-error=[4,7]
 // In embedder page.
 const webview = document.querySelector('webview')
 webview.addEventListener('ipc-message', (event) => {
@@ -975,7 +977,7 @@ webview.addEventListener('ipc-message', (event) => {
 webview.send('ping')
 ```
 
-```javascript
+```js
 // In guest page.
 const { ipcRenderer } = require('electron')
 ipcRenderer.on('ping', () => {
@@ -983,9 +985,22 @@ ipcRenderer.on('ping', () => {
 })
 ```
 
-### Event: 'crashed'
+### Event: 'crashed' _Deprecated_
 
-Fired when the renderer process is crashed.
+Fired when the renderer process crashes or is killed.
+
+**Deprecated:** This event is superceded by the `render-process-gone` event
+which contains more information about why the render process disappeared. It
+isn't always because it crashed.
+
+### Event: 'render-process-gone'
+
+Returns:
+
+* `details` [RenderProcessGoneDetails](structures/render-process-gone-details.md)
+
+Fired when the renderer process unexpectedly disappears. This is normally
+because it was crashed or killed.
 
 ### Event: 'plugin-crashed'
 
@@ -1091,7 +1106,7 @@ Returns:
   * `frameCharset` string - The character encoding of the frame on which the
     menu was invoked.
   * `inputFieldType` string - If the context menu was invoked on an input
-    field, the type of that field. Possible values are `none`, `plainText`,
+    field, the type of that field. Possible values include `none`, `plainText`,
     `password`, `other`.
   * `spellcheckEnabled` boolean - If the context is editable, whether or not spellchecking is enabled.
   * `menuSourceType` string - Input source that invoked the context menu.

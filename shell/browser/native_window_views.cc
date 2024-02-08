@@ -78,6 +78,7 @@
 #include "ui/display/screen.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/win/msg_util.h"
 #endif
 
 namespace electron {
@@ -136,6 +137,25 @@ gfx::Rect DIPToScreenRect(HWND hwnd, const gfx::Rect& pixel_bounds) {
   screen_rect.set_origin(
       display::win::ScreenWin::DIPToScreenRect(hwnd, pixel_bounds).origin());
   return screen_rect;
+}
+
+// Chromium uses a buggy implementation that converts content rect to window
+// rect when calculating min/max size, we should use the same implementation
+// when passing min/max size so we can get correct results.
+gfx::Size WindowSizeToContentSizeBuggy(HWND hwnd, const gfx::Size& size) {
+  // Calculate the size of window frame, using same code with the
+  // HWNDMessageHandler::OnGetMinMaxInfo method.
+  // The pitfall is, when window is minimized the calculated window frame size
+  // will be different from other states.
+  RECT client_rect, rect;
+  GetClientRect(hwnd, &client_rect);
+  GetWindowRect(hwnd, &rect);
+  CR_DEFLATE_RECT(&rect, &client_rect);
+  // Convert DIP size to pixel size, do calculation and then return DIP size.
+  gfx::Rect screen_rect = DIPToScreenRect(hwnd, gfx::Rect(size));
+  gfx::Size screen_client_size(screen_rect.width() - (rect.right - rect.left),
+                               screen_rect.height() - (rect.bottom - rect.top));
+  return ScreenToDIPRect(hwnd, gfx::Rect(screen_client_size)).size();
 }
 
 #endif
@@ -260,12 +280,12 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
   params.remove_standard_frame = !has_frame() || has_client_frame();
 
   // If a client frame, we need to draw our own shadows.
-  if (transparent() || has_client_frame())
+  if (IsTranslucent() || has_client_frame())
     params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
 
-  // The given window is most likely not rectangular since it uses
-  // transparency and has no standard frame, don't show a shadow for it.
-  if (transparent() && !has_frame())
+  // The given window is most likely not rectangular since it is translucent and
+  // has no standard frame, don't show a shadow for it.
+  if (IsTranslucent() && !has_frame())
     params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
 
   bool focusable;
@@ -640,11 +660,16 @@ void NativeWindowViews::Unmaximize() {
     if (transparent()) {
       SetBounds(restore_bounds_, false);
       NotifyWindowUnmaximize();
+      UpdateThickFrame();
       return;
     }
 #endif
 
     widget()->Restore();
+
+#if BUILDFLAG(IS_WIN)
+    UpdateThickFrame();
+#endif
   }
 }
 
@@ -677,6 +702,10 @@ void NativeWindowViews::Minimize() {
 
 void NativeWindowViews::Restore() {
   widget()->Restore();
+
+#if BUILDFLAG(IS_WIN)
+  UpdateThickFrame();
+#endif
 }
 
 bool NativeWindowViews::IsMinimized() {
@@ -812,6 +841,29 @@ void NativeWindowViews::SetContentSizeConstraints(
     old_size_constraints_ = size_constraints;
 }
 
+#if BUILDFLAG(IS_WIN)
+// This override does almost the same with its parent, except that it uses
+// the WindowSizeToContentSizeBuggy method to convert window size to content
+// size. See the comment of the method for the reason behind this.
+extensions::SizeConstraints NativeWindowViews::GetContentSizeConstraints()
+    const {
+  if (content_size_constraints_)
+    return *content_size_constraints_;
+  if (!size_constraints_)
+    return extensions::SizeConstraints();
+  extensions::SizeConstraints constraints;
+  if (size_constraints_->HasMaximumSize()) {
+    constraints.set_maximum_size(WindowSizeToContentSizeBuggy(
+        GetAcceleratedWidget(), size_constraints_->GetMaximumSize()));
+  }
+  if (size_constraints_->HasMinimumSize()) {
+    constraints.set_minimum_size(WindowSizeToContentSizeBuggy(
+        GetAcceleratedWidget(), size_constraints_->GetMinimumSize()));
+  }
+  return constraints;
+}
+#endif
+
 void NativeWindowViews::SetResizable(bool resizable) {
   if (resizable != resizable_) {
     // On Linux there is no "resizable" property of a window, we have to set
@@ -827,12 +879,13 @@ void NativeWindowViews::SetResizable(bool resizable) {
           extensions::SizeConstraints(content_size, content_size));
     }
   }
-#if BUILDFLAG(IS_WIN)
-  if (has_frame() && thick_frame_)
-    FlipWindowStyle(GetAcceleratedWidget(), resizable, WS_THICKFRAME);
-#endif
+
   resizable_ = resizable;
   SetCanResize(resizable_);
+
+#if BUILDFLAG(IS_WIN)
+  UpdateThickFrame();
+#endif
 }
 
 bool NativeWindowViews::MoveAbove(const std::string& sourceId) {
@@ -1410,6 +1463,8 @@ bool NativeWindowViews::IsMenuBarVisible() {
 }
 
 void NativeWindowViews::SetBackgroundMaterial(const std::string& material) {
+  NativeWindow::SetBackgroundMaterial(material);
+
 #if BUILDFLAG(IS_WIN)
   // DWMWA_USE_HOSTBACKDROPBRUSH is only supported on Windows 11 22H2 and up.
   if (base::win::GetVersion() < base::win::Version::WIN11_22H2)
@@ -1421,6 +1476,20 @@ void NativeWindowViews::SetBackgroundMaterial(const std::string& material) {
                             &backdrop_type, sizeof(backdrop_type));
   if (FAILED(result))
     LOG(WARNING) << "Failed to set background material to " << material;
+
+  // For frameless windows with a background material set, we also need to
+  // remove the caption color so it doesn't render a caption bar (since the
+  // window is frameless)
+  COLORREF caption_color = DWMWA_COLOR_DEFAULT;
+  if (backdrop_type != DWMSBT_NONE && backdrop_type != DWMSBT_AUTO &&
+      !has_frame()) {
+    caption_color = DWMWA_COLOR_NONE;
+  }
+  result = DwmSetWindowAttribute(GetAcceleratedWidget(), DWMWA_CAPTION_COLOR,
+                                 &caption_color, sizeof(caption_color));
+
+  if (FAILED(result))
+    LOG(WARNING) << "Failed to set caption color to transparent";
 #endif
 }
 
@@ -1556,6 +1625,22 @@ void NativeWindowViews::SetIcon(const gfx::ImageSkia& icon) {
   auto* tree_host = views::DesktopWindowTreeHostLinux::GetHostForWidget(
       GetAcceleratedWidget());
   tree_host->SetWindowIcons(icon, {});
+}
+#endif
+
+#if BUILDFLAG(IS_WIN)
+void NativeWindowViews::UpdateThickFrame() {
+  if (!thick_frame_)
+    return;
+
+  if (IsMaximized() && !transparent()) {
+    // For maximized window add thick frame always, otherwise it will be removed
+    // in HWNDMessageHandler::SizeConstraintsChanged() which will result in
+    // maximized window bounds change.
+    FlipWindowStyle(GetAcceleratedWidget(), true, WS_THICKFRAME);
+  } else if (has_frame()) {
+    FlipWindowStyle(GetAcceleratedWidget(), resizable_, WS_THICKFRAME);
+  }
 }
 #endif
 

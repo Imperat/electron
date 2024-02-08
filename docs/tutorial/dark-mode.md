@@ -50,7 +50,7 @@ of this theming, due to the use of the macOS 10.14 SDK.
 This example demonstrates an Electron application that derives its theme colors from the
 `nativeTheme`. Additionally, it provides theme toggle and reset controls using IPC channels.
 
-```javascript fiddle='docs/fiddles/features/dark-mode'
+```fiddle docs/fiddles/features/dark-mode
 
 ```
 
@@ -136,7 +136,7 @@ Finally, the `main.js` file represents the main process and contains the actual 
 
 ```js
 const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron')
-const path = require('path')
+const path = require('node:path')
 
 const createWindow = () => {
   const win = new BrowserWindow({

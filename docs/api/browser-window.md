@@ -7,7 +7,7 @@ Process: [Main](../glossary.md#main-process)
 This module cannot be used until the `ready` event of the `app`
 module is emitted.
 
-```javascript
+```js
 // In the main process.
 const { BrowserWindow } = require('electron')
 
@@ -38,7 +38,7 @@ While loading the page, the `ready-to-show` event will be emitted when the rende
 process has rendered the page for the first time if the window has not been shown yet. Showing
 the window after this event will have no visual flash:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow({ show: false })
 win.once('ready-to-show', () => {
@@ -59,7 +59,7 @@ For a complex app, the `ready-to-show` event could be emitted too late, making
 the app feel slow. In this case, it is recommended to show the window
 immediately, and use a `backgroundColor` close to your app's background:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 
 const win = new BrowserWindow({ backgroundColor: '#2e2c29' })
@@ -85,7 +85,7 @@ For more information about these color types see valid options in [win.setBackgr
 
 By using `parent` option, you can create child windows:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 
 const top = new BrowserWindow()
@@ -101,7 +101,7 @@ The `child` window will always show on top of the `top` window.
 A modal window is a child window that disables parent window, to create a modal
 window, you have to set both `parent` and `modal` options:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 
 const top = new BrowserWindow()
@@ -188,7 +188,7 @@ window should be closed, which will also be called when the window is
 reloaded. In Electron, returning any value other than `undefined` would cancel the
 close. For example:
 
-```javascript
+```js
 window.onbeforeunload = (e) => {
   console.log('I do not want to be closed')
 
@@ -351,7 +351,7 @@ Commands are lowercased, underscores are replaced with hyphens, and the
 `APPCOMMAND_` prefix is stripped off.
 e.g. `APPCOMMAND_BROWSER_BACKWARD` is emitted as `browser-backward`.
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow()
 win.on('app-command', (e, cmd) => {
@@ -486,7 +486,7 @@ Returns `BrowserWindow | null` - The window with the given `id`.
 
 Objects created with `new BrowserWindow` have the following properties:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 // In this example `win` is our instance
 const win = new BrowserWindow({ width: 800, height: 600 })
@@ -504,6 +504,10 @@ events.
 #### `win.id` _Readonly_
 
 A `Integer` property representing the unique ID of the window. Each ID is unique among all `BrowserWindow` instances of the entire Electron application.
+
+#### `win.tabbingIdentifier` _macOS_ _Readonly_
+
+A `string` (optional) property that is equal to the `tabbingIdentifier` passed to the `BrowserWindow` constructor or `undefined` if none was set.
 
 #### `win.autoHideMenuBar`
 
@@ -806,7 +810,7 @@ Closes the currently open [Quick Look][quick-look] panel.
 
 Resizes and moves the window to the supplied bounds. Any properties that are not supplied will default to their current values.
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow()
 
@@ -820,9 +824,13 @@ win.setBounds({ width: 100 })
 console.log(win.getBounds())
 ```
 
+**Note:** On macOS, the y-coordinate value cannot be smaller than the [Tray](tray.md) height. The tray height has changed over time and depends on the operating system, but is between 20-40px. Passing a value lower than the tray height will result in a window that is flush to the tray.
+
 #### `win.getBounds()`
 
 Returns [`Rectangle`](structures/rectangle.md) - The `bounds` of the window as `Object`.
+
+**Note:** On macOS, the y-coordinate value returned will be at minimum the [Tray](tray.md) height. For example, calling `win.setBounds({ x: 25, y: 20, width: 800, height: 600 })` with a tray height of 38 means that `win.getBounds()` will return `{ x: 25, y: 38, width: 800, height: 600 }`.
 
 #### `win.getBackgroundColor()`
 
@@ -1057,7 +1065,7 @@ Changes the attachment point for sheets on macOS. By default, sheets are
 attached just below the window frame, but you may want to display them beneath
 a HTML-rendered toolbar. For example:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow()
 
@@ -1200,14 +1208,14 @@ To ensure that file URLs are properly formatted, it is recommended to use
 Node's [`url.format`](https://nodejs.org/api/url.html#url_url_format_urlobject)
 method:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow()
 
 const url = require('url').format({
   protocol: 'file',
   slashes: true,
-  pathname: require('path').join(__dirname, 'index.html')
+  pathname: require('node:path').join(__dirname, 'index.html')
 })
 
 win.loadURL(url)
@@ -1216,7 +1224,7 @@ win.loadURL(url)
 You can load a URL using a `POST` request with URL-encoded data by doing
 the following:
 
-```javascript
+```js
 const { BrowserWindow } = require('electron')
 const win = new BrowserWindow()
 
@@ -1531,6 +1539,10 @@ tabs in the window.
 Selects the next tab when native tabs are enabled and there are other
 tabs in the window.
 
+#### `win.showAllTabs()` _macOS_
+
+Shows or hides the tab overview when native tabs are enabled.
+
 #### `win.mergeAllWindows()` _macOS_
 
 Merges all windows into one window with multiple tabs when native tabs
@@ -1554,15 +1566,11 @@ Adds a window as a tab on this window, after the tab for the window instance.
 
 #### `win.setVibrancy(type)` _macOS_
 
-* `type` string | null - Can be `appearance-based`, `light`, `dark`, `titlebar`,
-  `selection`, `menu`, `popover`, `sidebar`, `medium-light`, `ultra-dark`, `header`, `sheet`, `window`, `hud`, `fullscreen-ui`, `tooltip`, `content`, `under-window`, or `under-page`. See
+* `type` string | null - Can be `titlebar`, `selection`, `menu`, `popover`, `sidebar`, `header`, `sheet`, `window`, `hud`, `fullscreen-ui`, `tooltip`, `content`, `under-window`, or `under-page`. See
   the [macOS documentation][vibrancy-docs] for more details.
 
 Adds a vibrancy effect to the browser window. Passing `null` or an empty string
 will remove the vibrancy effect on the window.
-
-Note that `appearance-based`, `light`, `dark`, `medium-light`, and `ultra-dark` have been
-deprecated and will be removed in an upcoming version of macOS.
 
 #### `win.setBackgroundMaterial(material)` _Windows_
 
@@ -1651,8 +1659,8 @@ Throws an error if `browserView` is not attached to `win`.
 
 #### `win.getBrowserViews()` _Experimental_
 
-Returns `BrowserView[]` - an array of all BrowserViews that have been attached
-with `addBrowserView` or `setBrowserView`.
+Returns `BrowserView[]` - a sorted by z-index array of all BrowserViews that have been attached
+with `addBrowserView` or `setBrowserView`. The top-most BrowserView is the last element of the array.
 
 **Note:** The BrowserView API is currently experimental and may change or be
 removed in future Electron releases.

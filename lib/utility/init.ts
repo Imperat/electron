@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+
 import { ParentPort } from '@electron/internal/utility/parent-port';
 const Module = require('module');
 const v8Util = process._linkedBinding('electron_common_v8_util');
@@ -7,11 +9,10 @@ const entryScript: string = v8Util.getHiddenValue(process, '_serviceStartupScrip
 // we need to restore it here.
 process.argv.splice(1, 1, entryScript);
 
-// Clear search paths.
-require('../common/reset-search-paths');
-
 // Import common settings.
 require('@electron/internal/common/init');
+
+process._linkedBinding('electron_browser_event_emitter').setEventEmitterPrototype(EventEmitter.prototype);
 
 const parentPort: ParentPort = new ParentPort();
 Object.defineProperty(process, 'parentPort', {

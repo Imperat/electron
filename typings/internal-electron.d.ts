@@ -70,7 +70,6 @@ declare namespace Electron {
     _sendInternal(channel: string, ...args: any[]): void;
     _printToPDF(options: any): Promise<Buffer>;
     _print(options: any, callback?: (success: boolean, failureReason: string) => void): void;
-    _getPrinters(): Electron.PrinterInfo[];
     _getPrintersAsync(): Promise<Electron.PrinterInfo[]>;
     _init(): void;
     canGoToIndex(index: number): boolean;
@@ -115,7 +114,7 @@ declare namespace Electron {
     commandsMap: Record<string, MenuItem>;
     groupsMap: Record<string, MenuItem[]>;
     getItemCount(): number;
-    popupAt(window: BaseWindow, x: number, y: number, positioning: number, callback: () => void): void;
+    popupAt(window: BaseWindow, x: number, y: number, positioning: number, sourceType: Required<Electron.PopupOptions>['sourceType'], callback: () => void): void;
     closePopupAt(id: number): void;
     setSublabel(index: number, label: string): void;
     setToolTip(index: number, tooltip: string): void;

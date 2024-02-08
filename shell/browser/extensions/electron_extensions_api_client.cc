@@ -23,8 +23,8 @@
 #endif
 
 #if BUILDFLAG(ENABLE_PDF_VIEWER)
-#include "components/pdf/browser/pdf_web_contents_helper.h"  // nogncheck
-#include "shell/browser/electron_pdf_web_contents_helper_client.h"
+#include "components/pdf/browser/pdf_document_helper.h"  // nogncheck
+#include "shell/browser/electron_pdf_document_helper_client.h"
 #endif
 
 namespace extensions {
@@ -32,8 +32,7 @@ namespace extensions {
 class ElectronGuestViewManagerDelegate
     : public ExtensionsGuestViewManagerDelegate {
  public:
-  explicit ElectronGuestViewManagerDelegate(content::BrowserContext* context)
-      : ExtensionsGuestViewManagerDelegate(context) {}
+  ElectronGuestViewManagerDelegate() : ExtensionsGuestViewManagerDelegate() {}
   ~ElectronGuestViewManagerDelegate() override = default;
 
   // disable copy
@@ -97,11 +96,6 @@ void ElectronExtensionsAPIClient::AttachWebContentsHelpers(
   electron::PrintViewManagerElectron::CreateForWebContents(web_contents);
 #endif
 
-#if BUILDFLAG(ENABLE_PDF_VIEWER)
-  pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
-      web_contents, std::make_unique<ElectronPDFWebContentsHelperClient>());
-#endif
-
   extensions::ElectronExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
 }
@@ -118,9 +112,8 @@ ElectronExtensionsAPIClient::CreateMimeHandlerViewGuestDelegate(
 }
 
 std::unique_ptr<guest_view::GuestViewManagerDelegate>
-ElectronExtensionsAPIClient::CreateGuestViewManagerDelegate(
-    content::BrowserContext* context) const {
-  return std::make_unique<ElectronGuestViewManagerDelegate>(context);
+ElectronExtensionsAPIClient::CreateGuestViewManagerDelegate() const {
+  return std::make_unique<ElectronGuestViewManagerDelegate>();
 }
 
 }  // namespace extensions

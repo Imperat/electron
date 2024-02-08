@@ -1,13 +1,15 @@
 import { expect } from 'chai';
 import * as childProcess from 'node:child_process';
 import * as path from 'node:path';
-import { BrowserWindow, MessageChannelMain, utilityProcess } from 'electron/main';
+import { BrowserWindow, MessageChannelMain, utilityProcess, app } from 'electron/main';
 import { ifit } from './lib/spec-helpers';
 import { closeWindow } from './lib/window-helpers';
 import { once } from 'node:events';
+import { setImmediate } from 'node:timers/promises';
 
 const fixturesPath = path.resolve(__dirname, 'fixtures', 'api', 'utility-process');
 const isWindowsOnArm = process.platform === 'win32' && process.arch === 'arm64';
+const isWindows32Bit = process.platform === 'win32' && process.arch === 'ia32';
 
 describe('utilityProcess module', () => {
   describe('UtilityProcess constructor', () => {
@@ -56,14 +58,14 @@ describe('utilityProcess module', () => {
       expect(code).to.equal(0);
     });
 
-    it('emits \'exit\' when child process crashes', async () => {
+    ifit(!isWindows32Bit)('emits \'exit\' when child process crashes', async () => {
       const child = utilityProcess.fork(path.join(fixturesPath, 'crash.js'));
       // Do not check for exit code in this case,
       // SIGSEGV code can be 139 or 11 across our different CI pipeline.
       await once(child, 'exit');
     });
 
-    it('emits \'exit\' corresponding to the child process', async () => {
+    ifit(!isWindows32Bit)('emits \'exit\' corresponding to the child process', async () => {
       const child1 = utilityProcess.fork(path.join(fixturesPath, 'endless.js'));
       await once(child1, 'spawn');
       const child2 = utilityProcess.fork(path.join(fixturesPath, 'crash.js'));
@@ -83,6 +85,56 @@ describe('utilityProcess module', () => {
       const child = utilityProcess.fork(path.join(fixturesPath, 'custom-exit.js'), [`--exitCode=${exitCode}`]);
       const [code] = await once(child, 'exit');
       expect(code).to.equal(exitCode);
+    });
+  });
+
+  describe('app \'child-process-gone\' event', () => {
+    ifit(!isWindows32Bit)('with default serviceName', async () => {
+      utilityProcess.fork(path.join(fixturesPath, 'crash.js'));
+      const [, details] = await once(app, 'child-process-gone') as [any, Electron.Details];
+      expect(details.type).to.equal('Utility');
+      expect(details.serviceName).to.equal('node.mojom.NodeService');
+      expect(details.name).to.equal('Node Utility Process');
+      expect(details.reason).to.be.oneOf(['crashed', 'abnormal-exit']);
+    });
+
+    ifit(!isWindows32Bit)('with custom serviceName', async () => {
+      utilityProcess.fork(path.join(fixturesPath, 'crash.js'), [], { serviceName: 'Hello World!' });
+      const [, details] = await once(app, 'child-process-gone') as [any, Electron.Details];
+      expect(details.type).to.equal('Utility');
+      expect(details.serviceName).to.equal('node.mojom.NodeService');
+      expect(details.name).to.equal('Hello World!');
+      expect(details.reason).to.be.oneOf(['crashed', 'abnormal-exit']);
+    });
+  });
+
+  describe('app.getAppMetrics()', () => {
+    it('with default serviceName', async () => {
+      const child = utilityProcess.fork(path.join(fixturesPath, 'endless.js'));
+      await once(child, 'spawn');
+      expect(child.pid).to.not.be.null();
+
+      await setImmediate();
+
+      const details = app.getAppMetrics().find(item => item.pid === child.pid)!;
+      expect(details).to.be.an('object');
+      expect(details.type).to.equal('Utility');
+      expect(details.serviceName).to.to.equal('node.mojom.NodeService');
+      expect(details.name).to.equal('Node Utility Process');
+    });
+
+    it('with custom serviceName', async () => {
+      const child = utilityProcess.fork(path.join(fixturesPath, 'endless.js'), [], { serviceName: 'Hello World!' });
+      await once(child, 'spawn');
+      expect(child.pid).to.not.be.null();
+
+      await setImmediate();
+
+      const details = app.getAppMetrics().find(item => item.pid === child.pid)!;
+      expect(details).to.be.an('object');
+      expect(details.type).to.equal('Utility');
+      expect(details.serviceName).to.to.equal('node.mojom.NodeService');
+      expect(details.name).to.equal('Hello World!');
     });
   });
 
@@ -251,6 +303,30 @@ describe('utilityProcess module', () => {
           expect(output.trim()).to.contain(':17364', 'should be listening on port 17364');
           cleanup();
         }
+      };
+
+      child.stderr!.on('data', listener);
+      child.stdout!.on('data', listener);
+    });
+
+    it('supports changing dns verbatim with --dns-result-order', (done) => {
+      const child = utilityProcess.fork(path.join(fixturesPath, 'dns-result-order.js'), [], {
+        stdio: 'pipe',
+        execArgv: ['--dns-result-order=ipv4first']
+      });
+
+      let output = '';
+      const cleanup = () => {
+        child.stderr!.removeListener('data', listener);
+        child.stdout!.removeListener('data', listener);
+        child.once('exit', () => { done(); });
+        child.kill();
+      };
+
+      const listener = (data: Buffer) => {
+        output += data;
+        expect(output.trim()).to.contain('ipv4first', 'default verbatim should be ipv4first');
+        cleanup();
       };
 
       child.stderr!.on('data', listener);

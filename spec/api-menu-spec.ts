@@ -11,6 +11,10 @@ import { setTimeout } from 'node:timers/promises';
 const fixturesPath = path.resolve(__dirname, 'fixtures');
 
 describe('Menu module', function () {
+  it('sets the correct class name on the prototype', () => {
+    expect(Menu.prototype.constructor.name).to.equal('Menu');
+  });
+
   describe('Menu.buildFromTemplate', () => {
     it('should be able to attach extra fields', () => {
       const menu = Menu.buildFromTemplate([
@@ -944,7 +948,7 @@ describe('Menu module', function () {
       await new Promise<void>((resolve) => {
         appProcess.stdout.on('data', data => {
           output += data;
-          if (data.indexOf('Window has') > -1) {
+          if (data.includes('Window has')) {
             resolve();
           }
         });

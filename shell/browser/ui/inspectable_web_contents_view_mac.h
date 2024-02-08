@@ -8,9 +8,11 @@
 
 #include "shell/browser/ui/inspectable_web_contents_view.h"
 
-#include "base/mac/scoped_nsobject.h"
-
 @class ElectronInspectableWebContentsView;
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace electron {
 
@@ -32,9 +34,10 @@ class InspectableWebContentsViewMac : public InspectableWebContentsView {
   void SetContentsResizingStrategy(
       const DevToolsContentsResizingStrategy& strategy) override;
   void SetTitle(const std::u16string& title) override;
+  const std::u16string GetTitle() override;
 
  private:
-  base::scoped_nsobject<ElectronInspectableWebContentsView> view_;
+  ElectronInspectableWebContentsView* __strong view_;
 };
 
 }  // namespace electron

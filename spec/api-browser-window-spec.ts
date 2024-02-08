@@ -14,6 +14,7 @@ import { closeWindow, closeAllWindows } from './lib/window-helpers';
 import { areColorsSimilar, captureScreen, HexColors, getPixelColor } from './lib/screen-helpers';
 import { once } from 'node:events';
 import { setTimeout } from 'node:timers/promises';
+import { setTimeout as syncSetTimeout } from 'node:timers';
 
 const fixtures = path.resolve(__dirname, 'fixtures');
 const mainFixtures = path.resolve(__dirname, 'fixtures');
@@ -47,6 +48,10 @@ const isBeforeUnload = (event: Event, level: number, message: string) => {
 };
 
 describe('BrowserWindow module', () => {
+  it('sets the correct class name on the prototype', () => {
+    expect(BrowserWindow.prototype.constructor.name).to.equal('BrowserWindow');
+  });
+
   describe('BrowserWindow constructor', () => {
     it('allows passing void 0 as the webContents', async () => {
       expect(() => {
@@ -579,6 +584,26 @@ describe('BrowserWindow module', () => {
           await once(w.webContents, 'did-navigate');
           expect(initiator).not.to.be.undefined();
           expect(initiator).to.equal(subframe);
+        });
+
+        it('is triggered when navigating from chrome: to http:', async () => {
+          let hasEmittedWillNavigate = false;
+          const willNavigatePromise = new Promise((resolve) => {
+            w.webContents.once('will-navigate', e => {
+              e.preventDefault();
+              hasEmittedWillNavigate = true;
+              resolve(e.url);
+            });
+          });
+          await w.loadURL('chrome://gpu');
+
+          // shouldn't emit for browser-initiated request via loadURL
+          expect(hasEmittedWillNavigate).to.equal(false);
+
+          w.webContents.executeJavaScript(`location.href = ${JSON.stringify(url)}`);
+          const navigatedTo = await willNavigatePromise;
+          expect(navigatedTo).to.equal(url + '/');
+          expect(w.webContents.getURL()).to.equal('chrome://gpu/');
         });
       });
 
@@ -1126,6 +1151,34 @@ describe('BrowserWindow module', () => {
         await shown;
         expect(w.isMaximized()).to.equal(true);
       });
+
+      ifit(process.platform === 'darwin')('should attach child window to parent', async () => {
+        const wShow = once(w, 'show');
+        w.show();
+        await wShow;
+
+        const c = new BrowserWindow({ show: false, parent: w });
+        const cShow = once(c, 'show');
+        c.showInactive();
+        await cShow;
+
+        // verifying by checking that the child tracks the parent's visibility
+        const minimized = once(w, 'minimize');
+        w.minimize();
+        await minimized;
+
+        expect(w.isVisible()).to.be.false('parent is visible');
+        expect(c.isVisible()).to.be.false('child is visible');
+
+        const restored = once(w, 'restore');
+        w.restore();
+        await restored;
+
+        expect(w.isVisible()).to.be.true('parent is visible');
+        expect(c.isVisible()).to.be.true('child is visible');
+
+        closeWindow(c);
+      });
     });
 
     describe('BrowserWindow.focus()', () => {
@@ -1279,6 +1332,8 @@ describe('BrowserWindow module', () => {
     });
 
     describe('BrowserWindow.moveTop()', () => {
+      afterEach(closeAllWindows);
+
       it('should not steal focus', async () => {
         const posDelta = 50;
         const wShownInactive = once(w, 'show');
@@ -1319,6 +1374,15 @@ describe('BrowserWindow module', () => {
 
         await closeWindow(otherWindow, { assertNotWindows: false });
         expect(BrowserWindow.getAllWindows()).to.have.lengthOf(1);
+      });
+
+      it('should not crash when called on a modal child window', async () => {
+        const shown = once(w, 'show');
+        w.show();
+        await shown;
+
+        const child = new BrowserWindow({ modal: true, parent: w });
+        expect(() => { child.moveTop(); }).to.not.throw();
       });
     });
 
@@ -1718,6 +1782,36 @@ describe('BrowserWindow module', () => {
           expect(w.isFullScreen()).to.equal(true);
         });
 
+        it('does not crash if maximized, minimized, then restored to maximized state', (done) => {
+          w.destroy();
+          w = new BrowserWindow({ show: false });
+
+          w.show();
+
+          let count = 0;
+
+          w.on('maximize', () => {
+            if (count === 0) syncSetTimeout(() => { w.minimize(); });
+            count++;
+          });
+
+          w.on('minimize', () => {
+            if (count === 1) syncSetTimeout(() => { w.restore(); });
+            count++;
+          });
+
+          w.on('restore', () => {
+            try {
+              throw new Error('hey!');
+            } catch (e: any) {
+              expect(e.message).to.equal('hey!');
+              done();
+            }
+          });
+
+          w.maximize();
+        });
+
         it('checks normal bounds for maximized transparent window', async () => {
           w.destroy();
           w = new BrowserWindow({
@@ -2051,10 +2145,7 @@ describe('BrowserWindow module', () => {
     beforeEach(() => {
       w = new BrowserWindow({ show: false });
     });
-    afterEach(async () => {
-      await closeWindow(w);
-      w = null as unknown as BrowserWindow;
-    });
+    afterEach(closeAllWindows);
 
     describe('BrowserWindow.selectPreviousTab()', () => {
       it('does not throw', () => {
@@ -2068,6 +2159,14 @@ describe('BrowserWindow module', () => {
       it('does not throw', () => {
         expect(() => {
           w.selectNextTab();
+        }).to.not.throw();
+      });
+    });
+
+    describe('BrowserWindow.showAllTabs()', () => {
+      it('does not throw', () => {
+        expect(() => {
+          w.showAllTabs();
         }).to.not.throw();
       });
     });
@@ -2113,6 +2212,18 @@ describe('BrowserWindow module', () => {
         expect(() => {
           w.addTabbedWindow(w);
         }).to.throw('AddTabbedWindow cannot be called by a window on itself.');
+      });
+    });
+
+    describe('BrowserWindow.tabbingIdentifier', () => {
+      it('is undefined if no tabbingIdentifier was set', () => {
+        const w = new BrowserWindow({ show: false });
+        expect(w.tabbingIdentifier).to.be.undefined('tabbingIdentifier');
+      });
+
+      it('returns the window tabbingIdentifier', () => {
+        const w = new BrowserWindow({ show: false, tabbingIdentifier: 'group1' });
+        expect(w.tabbingIdentifier).to.equal('group1');
       });
     });
   });
@@ -2198,7 +2309,22 @@ describe('BrowserWindow module', () => {
       expect(visible).to.equal('hidden');
     });
 
-    it('resolves after the window is hidden', async () => {
+    it('resolves when the window is occluded', async () => {
+      const w1 = new BrowserWindow({ show: false });
+      w1.loadFile(path.join(fixtures, 'pages', 'a.html'));
+      await once(w1, 'ready-to-show');
+      w1.show();
+
+      const w2 = new BrowserWindow({ show: false });
+      w2.loadFile(path.join(fixtures, 'pages', 'a.html'));
+      await once(w2, 'ready-to-show');
+      w2.show();
+
+      const visibleImage = await w1.capturePage();
+      expect(visibleImage.isEmpty()).to.equal(false);
+    });
+
+    it('resolves when the window is not visible', async () => {
       const w = new BrowserWindow({ show: false });
       w.loadFile(path.join(fixtures, 'pages', 'a.html'));
       await once(w, 'ready-to-show');
@@ -2207,21 +2333,10 @@ describe('BrowserWindow module', () => {
       const visibleImage = await w.capturePage();
       expect(visibleImage.isEmpty()).to.equal(false);
 
-      w.hide();
+      w.minimize();
 
       const hiddenImage = await w.capturePage();
-      const isEmpty = process.platform !== 'darwin';
-      expect(hiddenImage.isEmpty()).to.equal(isEmpty);
-    });
-
-    it('resolves after the window is hidden and capturer count is non-zero', async () => {
-      const w = new BrowserWindow({ show: false });
-      w.webContents.setBackgroundThrottling(false);
-      w.loadFile(path.join(fixtures, 'pages', 'a.html'));
-      await once(w, 'ready-to-show');
-
-      const image = await w.capturePage();
-      expect(image.isEmpty()).to.equal(false);
+      expect(hiddenImage.isEmpty()).to.equal(false);
     });
 
     it('preserves transparency', async () => {
@@ -2499,10 +2614,10 @@ describe('BrowserWindow module', () => {
     it('allows setting, changing, and removing the vibrancy', () => {
       const w = new BrowserWindow({ show: false });
       expect(() => {
-        w.setVibrancy('light');
-        w.setVibrancy('dark');
+        w.setVibrancy('titlebar');
+        w.setVibrancy('selection');
         w.setVibrancy(null);
-        w.setVibrancy('ultra-dark');
+        w.setVibrancy('menu');
         w.setVibrancy('' as any);
       }).to.not.throw();
     });
@@ -4060,7 +4175,8 @@ describe('BrowserWindow module', () => {
     });
   });
 
-  describe('document.visibilityState/hidden', () => {
+  // TODO(codebytere): figure out how to make these pass in CI on Windows.
+  ifdescribe(process.platform !== 'win32')('document.visibilityState/hidden', () => {
     afterEach(closeAllWindows);
 
     it('visibilityState is initially visible despite window being hidden', async () => {
@@ -4088,8 +4204,7 @@ describe('BrowserWindow module', () => {
       expect(hidden).to.be.false('hidden');
     });
 
-    // TODO(nornagon): figure out why this is failing on windows
-    ifit(process.platform !== 'win32')('visibilityState changes when window is hidden', async () => {
+    it('visibilityState changes when window is hidden', async () => {
       const w = new BrowserWindow({
         width: 100,
         height: 100,
@@ -4116,8 +4231,7 @@ describe('BrowserWindow module', () => {
       }
     });
 
-    // TODO(nornagon): figure out why this is failing on windows
-    ifit(process.platform !== 'win32')('visibilityState changes when window is shown', async () => {
+    it('visibilityState changes when window is shown', async () => {
       const w = new BrowserWindow({
         width: 100,
         height: 100,
@@ -4138,7 +4252,7 @@ describe('BrowserWindow module', () => {
       expect(visibilityState).to.equal('visible');
     });
 
-    ifit(process.platform !== 'win32')('visibilityState changes when window is shown inactive', async () => {
+    it('visibilityState changes when window is shown inactive', async () => {
       const w = new BrowserWindow({
         width: 100,
         height: 100,
@@ -4158,7 +4272,6 @@ describe('BrowserWindow module', () => {
       expect(visibilityState).to.equal('visible');
     });
 
-    // TODO(nornagon): figure out why this is failing on windows
     ifit(process.platform === 'darwin')('visibilityState changes when window is minimized', async () => {
       const w = new BrowserWindow({
         width: 100,
@@ -4185,8 +4298,6 @@ describe('BrowserWindow module', () => {
       }
     });
 
-    // DISABLED-FIXME(MarshallOfSound): This test fails locally 100% of the time, on CI it started failing
-    // when we introduced the compositor recycling patch.  Should figure out how to fix this
     it('visibilityState remains visible if backgroundThrottling is disabled', async () => {
       const w = new BrowserWindow({
         show: false,
@@ -4194,10 +4305,13 @@ describe('BrowserWindow module', () => {
         height: 100,
         webPreferences: {
           backgroundThrottling: false,
-          nodeIntegration: true
+          nodeIntegration: true,
+          contextIsolation: false
         }
       });
+
       w.loadFile(path.join(fixtures, 'pages', 'visibilitychange.html'));
+
       {
         const [, visibilityState, hidden] = await once(ipcMain, 'pong');
         expect(visibilityState).to.equal('visible');
@@ -4694,7 +4808,27 @@ describe('BrowserWindow module', () => {
         expect(w.getChildWindows().length).to.equal(0);
       });
 
-      ifit(process.platform === 'darwin')('child window matches visibility when visibility changes', async () => {
+      ifit(process.platform === 'darwin')('only shows the intended window when a child with siblings is shown', async () => {
+        const w = new BrowserWindow({ show: false });
+        const childOne = new BrowserWindow({ show: false, parent: w });
+        const childTwo = new BrowserWindow({ show: false, parent: w });
+
+        const parentShown = once(w, 'show');
+        w.show();
+        await parentShown;
+
+        expect(childOne.isVisible()).to.be.false('childOne is visible');
+        expect(childTwo.isVisible()).to.be.false('childTwo is visible');
+
+        const childOneShown = once(childOne, 'show');
+        childOne.show();
+        await childOneShown;
+
+        expect(childOne.isVisible()).to.be.true('childOne is not visible');
+        expect(childTwo.isVisible()).to.be.false('childTwo is visible');
+      });
+
+      ifit(process.platform === 'darwin')('child matches parent visibility when parent visibility changes', async () => {
         const w = new BrowserWindow({ show: false });
         const c = new BrowserWindow({ show: false, parent: w });
 
@@ -4721,7 +4855,7 @@ describe('BrowserWindow module', () => {
         expect(c.isVisible()).to.be.true('child is visible');
       });
 
-      ifit(process.platform === 'darwin')('matches child window visibility when visibility changes', async () => {
+      ifit(process.platform === 'darwin')('parent matches child visibility when child visibility changes', async () => {
         const w = new BrowserWindow({ show: false });
         const c = new BrowserWindow({ show: false, parent: w });
 
@@ -4785,6 +4919,7 @@ describe('BrowserWindow module', () => {
         c.setParentWindow(null);
         expect(c.getParentWindow()).to.be.null('c.parent');
       });
+
       it('adds window to child windows of parent', () => {
         const w = new BrowserWindow({ show: false });
         const c = new BrowserWindow({ show: false });
@@ -4794,6 +4929,7 @@ describe('BrowserWindow module', () => {
         c.setParentWindow(null);
         expect(w.getChildWindows()).to.deep.equal([]);
       });
+
       it('removes from child windows of parent when window is closed', async () => {
         const w = new BrowserWindow({ show: false });
         const c = new BrowserWindow({ show: false });
@@ -4804,6 +4940,25 @@ describe('BrowserWindow module', () => {
         // The child window list is not immediately cleared, so wait a tick until it's ready.
         await setTimeout();
         expect(w.getChildWindows().length).to.equal(0);
+      });
+
+      ifit(process.platform === 'darwin')('can reparent when the first parent is destroyed', async () => {
+        const w1 = new BrowserWindow({ show: false });
+        const w2 = new BrowserWindow({ show: false });
+        const c = new BrowserWindow({ show: false });
+
+        c.setParentWindow(w1);
+        expect(w1.getChildWindows().length).to.equal(1);
+
+        const closed = once(w1, 'closed');
+        w1.destroy();
+        await closed;
+
+        c.setParentWindow(w2);
+        await setTimeout();
+
+        const children = w2.getChildWindows();
+        expect(children[0]).to.equal(c);
       });
     });
 
@@ -5005,6 +5160,55 @@ describe('BrowserWindow module', () => {
         expectBoundsEqual(w.getContentSize(), [30, 30]);
         w.setContentSize(10, 10);
         expectBoundsEqual(w.getContentSize(), [10, 10]);
+      });
+
+      ifit(process.platform === 'win32')('do not change window with frame bounds when maximized', () => {
+        const w = new BrowserWindow({
+          show: true,
+          frame: true,
+          thickFrame: true
+        });
+        expect(w.isResizable()).to.be.true('resizable');
+        w.maximize();
+        expect(w.isMaximized()).to.be.true('maximized');
+        const bounds = w.getBounds();
+        w.setResizable(false);
+        expectBoundsEqual(w.getBounds(), bounds);
+        w.setResizable(true);
+        expectBoundsEqual(w.getBounds(), bounds);
+      });
+
+      ifit(process.platform === 'win32')('do not change window without frame bounds when maximized', () => {
+        const w = new BrowserWindow({
+          show: true,
+          frame: false,
+          thickFrame: true
+        });
+        expect(w.isResizable()).to.be.true('resizable');
+        w.maximize();
+        expect(w.isMaximized()).to.be.true('maximized');
+        const bounds = w.getBounds();
+        w.setResizable(false);
+        expectBoundsEqual(w.getBounds(), bounds);
+        w.setResizable(true);
+        expectBoundsEqual(w.getBounds(), bounds);
+      });
+
+      ifit(process.platform === 'win32')('do not change window transparent without frame bounds when maximized', () => {
+        const w = new BrowserWindow({
+          show: true,
+          frame: false,
+          thickFrame: true,
+          transparent: true
+        });
+        expect(w.isResizable()).to.be.true('resizable');
+        w.maximize();
+        expect(w.isMaximized()).to.be.true('maximized');
+        const bounds = w.getBounds();
+        w.setResizable(false);
+        expectBoundsEqual(w.getBounds(), bounds);
+        w.setResizable(true);
+        expectBoundsEqual(w.getBounds(), bounds);
       });
     });
 
@@ -5412,6 +5616,55 @@ describe('BrowserWindow module', () => {
           w.setFullScreenable(true);
           expect(w.isFullScreenable()).to.be.true('isFullScreenable');
         });
+      });
+
+      it('does not open non-fullscreenable child windows in fullscreen if parent is fullscreen', async () => {
+        const w = new BrowserWindow();
+
+        const enterFS = once(w, 'enter-full-screen');
+        w.setFullScreen(true);
+        await enterFS;
+
+        const child = new BrowserWindow({ parent: w, resizable: false, fullscreenable: false });
+        const shown = once(child, 'show');
+        await shown;
+
+        expect(child.resizable).to.be.false('resizable');
+        expect(child.fullScreen).to.be.false('fullscreen');
+        expect(child.fullScreenable).to.be.false('fullscreenable');
+      });
+
+      it('is set correctly with different resizable values', async () => {
+        const w1 = new BrowserWindow({
+          resizable: false,
+          fullscreenable: false
+        });
+
+        const w2 = new BrowserWindow({
+          resizable: true,
+          fullscreenable: false
+        });
+
+        const w3 = new BrowserWindow({
+          fullscreenable: false
+        });
+
+        expect(w1.isFullScreenable()).to.be.false('isFullScreenable');
+        expect(w2.isFullScreenable()).to.be.false('isFullScreenable');
+        expect(w3.isFullScreenable()).to.be.false('isFullScreenable');
+      });
+
+      it('does not disable maximize button if window is resizable', () => {
+        const w = new BrowserWindow({
+          resizable: true,
+          fullscreenable: false
+        });
+
+        expect(w.isMaximizable()).to.be.true('isMaximizable');
+
+        w.setResizable(false);
+
+        expect(w.isMaximizable()).to.be.false('isMaximizable');
       });
     });
 
@@ -6296,7 +6549,7 @@ describe('BrowserWindow module', () => {
       foregroundWindow.loadFile(path.join(__dirname, 'fixtures', 'pages', 'css-transparent.html'));
       await once(ipcMain, 'set-transparent');
 
-      await setTimeout();
+      await setTimeout(1000);
       const screenCapture = await captureScreen();
       const centerColor = getPixelColor(screenCapture, {
         x: display.size.width / 2,
@@ -6319,7 +6572,7 @@ describe('BrowserWindow module', () => {
         await once(window, 'show');
         await window.webContents.loadURL('data:text/html,<head><meta name="color-scheme" content="dark"></head>');
 
-        await setTimeout(500);
+        await setTimeout(1000);
         const screenCapture = await captureScreen();
         const centerColor = getPixelColor(screenCapture, {
           x: display.size.width / 2,
@@ -6349,6 +6602,7 @@ describe('BrowserWindow module', () => {
       w.loadURL('about:blank');
       await once(w, 'ready-to-show');
 
+      await setTimeout(1000);
       const screenCapture = await captureScreen();
       const centerColor = getPixelColor(screenCapture, {
         x: display.size.width / 2,

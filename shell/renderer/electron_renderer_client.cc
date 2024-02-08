@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/containers/contains.h"
+#include "base/debug/stack_trace.h"
 #include "content/public/renderer/render_frame.h"
 #include "electron/buildflags/buildflags.h"
 #include "net/http/http_request_headers.h"
@@ -25,10 +26,10 @@
 namespace electron {
 
 ElectronRendererClient::ElectronRendererClient()
-    : node_bindings_(
-          NodeBindings::Create(NodeBindings::BrowserEnvironment::kRenderer)),
-      electron_bindings_(
-          std::make_unique<ElectronBindings>(node_bindings_->uv_loop())) {}
+    : node_bindings_{NodeBindings::Create(
+          NodeBindings::BrowserEnvironment::kRenderer)},
+      electron_bindings_{
+          std::make_unique<ElectronBindings>(node_bindings_->uv_loop())} {}
 
 ElectronRendererClient::~ElectronRendererClient() = default;
 
@@ -87,7 +88,7 @@ void ElectronRendererClient::DidCreateScriptContext(
   v8::Maybe<bool> initialized = node::InitializeContext(renderer_context);
   CHECK(!initialized.IsNothing() && initialized.FromJust());
 
-  node::Environment* env =
+  std::shared_ptr<node::Environment> env =
       node_bindings_->CreateEnvironment(renderer_context, nullptr);
 
   // If we have disabled the site instance overrides we should prevent loading
@@ -105,11 +106,11 @@ void ElectronRendererClient::DidCreateScriptContext(
   BindProcess(env->isolate(), &process_dict, render_frame);
 
   // Load everything.
-  node_bindings_->LoadEnvironment(env);
+  node_bindings_->LoadEnvironment(env.get());
 
   if (node_bindings_->uv_env() == nullptr) {
     // Make uv loop being wrapped by window context.
-    node_bindings_->set_uv_env(env);
+    node_bindings_->set_uv_env(env.get());
 
     // Give the node loop a run to make sure everything is ready.
     node_bindings_->StartPolling();
@@ -123,7 +124,9 @@ void ElectronRendererClient::WillReleaseScriptContext(
     return;
 
   node::Environment* env = node::Environment::GetCurrent(context);
-  if (environments_.erase(env) == 0)
+  const auto iter = base::ranges::find_if(
+      environments_, [env](auto& item) { return env == item.get(); });
+  if (iter == environments_.end())
     return;
 
   gin_helper::EmitEvent(env->isolate(), env->process_object(), "exit");
@@ -142,11 +145,7 @@ void ElectronRendererClient::WillReleaseScriptContext(
   DCHECK_EQ(microtask_queue->GetMicrotasksScopeDepth(), 0);
   microtask_queue->set_microtasks_policy(v8::MicrotasksPolicy::kExplicit);
 
-  node::FreeEnvironment(env);
-  if (node_bindings_->uv_env() == nullptr) {
-    node::FreeIsolateData(node_bindings_->isolate_data());
-    node_bindings_->set_isolate_data(nullptr);
-  }
+  environments_.erase(iter);
 
   microtask_queue->set_microtasks_policy(old_policy);
 
@@ -159,19 +158,20 @@ void ElectronRendererClient::WorkerScriptReadyForEvaluationOnWorkerThread(
   // We do not create a Node.js environment in service or shared workers
   // owing to an inability to customize sandbox policies in these workers
   // given that they're run out-of-process.
+  // Also avoid creating a Node.js environment for worklet global scope
+  // created on the main thread.
   auto* ec = blink::ExecutionContext::From(context);
-  if (ec->IsServiceWorkerGlobalScope() || ec->IsSharedWorkerGlobalScope())
+  if (ec->IsServiceWorkerGlobalScope() || ec->IsSharedWorkerGlobalScope() ||
+      ec->IsMainThreadWorkletGlobalScope())
     return;
 
   // This won't be correct for in-process child windows with webPreferences
   // that have a different value for nodeIntegrationInWorker
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNodeIntegrationInWorker)) {
-    // WorkerScriptReadyForEvaluationOnWorkerThread can be invoked multiple
-    // times for the same thread, so we need to create a new observer each time
-    // this happens. We use a ThreadLocalOwnedPointer to ensure that the old
-    // observer for a given thread gets destructed when swapping with the new
-    // observer in WebWorkerObserver::Create.
+    auto* current = WebWorkerObserver::GetCurrent();
+    if (current)
+      return;
     WebWorkerObserver::Create()->WorkerScriptReadyForEvaluation(context);
   }
 }
@@ -179,7 +179,8 @@ void ElectronRendererClient::WorkerScriptReadyForEvaluationOnWorkerThread(
 void ElectronRendererClient::WillDestroyWorkerContextOnWorkerThread(
     v8::Local<v8::Context> context) {
   auto* ec = blink::ExecutionContext::From(context);
-  if (ec->IsServiceWorkerGlobalScope() || ec->IsSharedWorkerGlobalScope())
+  if (ec->IsServiceWorkerGlobalScope() || ec->IsSharedWorkerGlobalScope() ||
+      ec->IsMainThreadWorkletGlobalScope())
     return;
 
   // TODO(loc): Note that this will not be correct for in-process child windows
@@ -200,7 +201,11 @@ node::Environment* ElectronRendererClient::GetEnvironment(
   auto context =
       GetContext(render_frame->GetWebFrame(), v8::Isolate::GetCurrent());
   node::Environment* env = node::Environment::GetCurrent(context);
-  return base::Contains(environments_, env) ? env : nullptr;
+
+  return base::Contains(environments_, env,
+                        [](auto const& item) { return item.get(); })
+             ? env
+             : nullptr;
 }
 
 }  // namespace electron

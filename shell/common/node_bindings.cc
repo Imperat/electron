@@ -19,9 +19,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
+#include "chrome/common/chrome_version.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_paths.h"
 #include "electron/buildflags/buildflags.h"
+#include "electron/electron_version.h"
 #include "electron/fuses.h"
 #include "shell/browser/api/electron_api_app.h"
 #include "shell/common/api/electron_bindings.h"
@@ -30,10 +32,9 @@
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/gin_helper/event.h"
 #include "shell/common/gin_helper/event_emitter_caller.h"
-#include "shell/common/gin_helper/locker.h"
 #include "shell/common/gin_helper/microtasks_scope.h"
 #include "shell/common/mac/main_application_bundle.h"
-#include "shell/common/node_includes.h"
+#include "shell/common/node_util.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"  // nogncheck
 #include "third_party/electron_node/src/debug_utils.h"
 
@@ -55,7 +56,6 @@
   V(electron_browser_menu)               \
   V(electron_browser_message_port)       \
   V(electron_browser_native_theme)       \
-  V(electron_browser_net)                \
   V(electron_browser_notification)       \
   V(electron_browser_power_monitor)      \
   V(electron_browser_power_save_blocker) \
@@ -74,7 +74,8 @@
   V(electron_browser_web_contents_view)  \
   V(electron_browser_web_frame_main)     \
   V(electron_browser_web_view_manager)   \
-  V(electron_browser_window)
+  V(electron_browser_window)             \
+  V(electron_common_net)
 
 #define ELECTRON_COMMON_BINDINGS(V)   \
   V(electron_common_asar)             \
@@ -93,7 +94,10 @@
   V(electron_renderer_ipc)            \
   V(electron_renderer_web_frame)
 
-#define ELECTRON_UTILITY_BINDINGS(V) V(electron_utility_parent_port)
+#define ELECTRON_UTILITY_BINDINGS(V) \
+  V(electron_browser_event_emitter)  \
+  V(electron_common_net)             \
+  V(electron_utility_parent_port)
 
 #define ELECTRON_VIEWS_BINDINGS(V) V(electron_browser_image_view)
 
@@ -218,8 +222,11 @@ void ErrorMessageListener(v8::Local<v8::Message> message,
     // Analogous to node/lib/internal/process/execution.js#L176-L180
     if (env->async_hooks()->fields()[node::AsyncHooks::kAfter]) {
       while (env->async_hooks()->fields()[node::AsyncHooks::kStackLength]) {
-        node::AsyncWrap::EmitAfter(env, env->execution_async_id());
-        env->async_hooks()->pop_async_context(env->execution_async_id());
+        double id = env->execution_async_id();
+        // Do not call EmitAfter for asyncId 0.
+        if (id != 0)
+          node::AsyncWrap::EmitAfter(env, id);
+        env->async_hooks()->pop_async_context(id);
       }
     }
 
@@ -229,39 +236,56 @@ void ErrorMessageListener(v8::Local<v8::Message> message,
   }
 }
 
-// Only allow DebugOptions in non-ELECTRON_RUN_AS_NODE mode.
+// Only allow a specific subset of options in non-ELECTRON_RUN_AS_NODE mode.
 // If node CLI inspect support is disabled, allow no debug options.
-bool IsAllowedDebugOption(base::StringPiece option) {
-  static constexpr auto options = base::MakeFixedFlatSet<base::StringPiece>({
-      "--debug",
-      "--debug-brk",
-      "--debug-port",
-      "--inspect",
-      "--inspect-brk",
-      "--inspect-brk-node",
-      "--inspect-port",
-      "--inspect-publish-uid",
-  });
+bool IsAllowedOption(base::StringPiece option) {
+  static constexpr auto debug_options =
+      base::MakeFixedFlatSetSorted<base::StringPiece>({
+          "--debug",
+          "--debug-brk",
+          "--debug-port",
+          "--inspect",
+          "--inspect-brk",
+          "--inspect-brk-node",
+          "--inspect-port",
+          "--inspect-publish-uid",
+      });
 
-  return electron::fuses::IsNodeCliInspectEnabled() && options.contains(option);
+  // This should be aligned with what's possible to set via the process object.
+  static constexpr auto options =
+      base::MakeFixedFlatSetSorted<base::StringPiece>({
+          "--dns-result-order",
+          "--no-deprecation",
+          "--throw-deprecation",
+          "--trace-deprecation",
+          "--trace-warnings",
+      });
+
+  if (debug_options.contains(option))
+    return electron::fuses::IsNodeCliInspectEnabled();
+
+  return options.contains(option);
 }
 
 // Initialize NODE_OPTIONS to pass to Node.js
 // See https://nodejs.org/api/cli.html#cli_node_options_options
 void SetNodeOptions(base::Environment* env) {
   // Options that are unilaterally disallowed
-  static constexpr auto disallowed = base::MakeFixedFlatSet<base::StringPiece>({
-      "--enable-fips",
-      "--force-fips",
-      "--openssl-config",
-      "--use-bundled-ca",
-      "--use-openssl-ca",
-  });
+  static constexpr auto disallowed =
+      base::MakeFixedFlatSetSorted<base::StringPiece>({
+          "--enable-fips",
+          "--experimental-policy",
+          "--force-fips",
+          "--openssl-config",
+          "--use-bundled-ca",
+          "--use-openssl-ca",
+      });
 
-  static constexpr auto pkg_opts = base::MakeFixedFlatSet<base::StringPiece>({
-      "--http-parser",
-      "--max-http-header-size",
-  });
+  static constexpr auto pkg_opts =
+      base::MakeFixedFlatSetSorted<base::StringPiece>({
+          "--http-parser",
+          "--max-http-header-size",
+      });
 
   if (env->HasVar("NODE_OPTIONS")) {
     if (electron::fuses::IsNodeOptionsEnabled()) {
@@ -316,21 +340,11 @@ base::FilePath GetResourcesPath() {
   return exec_path.DirName().Append(FILE_PATH_LITERAL("resources"));
 #endif
 }
-
 }  // namespace
 
 NodeBindings::NodeBindings(BrowserEnvironment browser_env)
-    : browser_env_(browser_env) {
-  if (browser_env == BrowserEnvironment::kWorker) {
-    uv_loop_init(&worker_loop_);
-    uv_loop_ = &worker_loop_;
-  } else {
-    uv_loop_ = uv_default_loop();
-  }
-
-  // Interrupt embed polling when a handle is started.
-  uv_loop_configure(uv_loop_, UV_LOOP_INTERRUPT_ON_IO_CHANGE);
-}
+    : browser_env_{browser_env},
+      uv_loop_{InitEventLoop(browser_env, &worker_loop_)} {}
 
 NodeBindings::~NodeBindings() {
   // Quit the embed thread.
@@ -349,6 +363,24 @@ NodeBindings::~NodeBindings() {
   // Clean up worker loop
   if (in_worker_loop())
     stop_and_close_uv_loop(uv_loop_);
+}
+
+// static
+uv_loop_t* NodeBindings::InitEventLoop(BrowserEnvironment browser_env,
+                                       uv_loop_t* worker_loop) {
+  uv_loop_t* event_loop = nullptr;
+
+  if (browser_env == BrowserEnvironment::kWorker) {
+    uv_loop_init(worker_loop);
+    event_loop = worker_loop;
+  } else {
+    event_loop = uv_default_loop();
+  }
+
+  // Interrupt embed polling when a handle is started.
+  uv_loop_configure(event_loop, UV_LOOP_INTERRUPT_ON_IO_CHANGE);
+
+  return event_loop;
 }
 
 void NodeBindings::RegisterBuiltinBindings() {
@@ -378,7 +410,7 @@ bool NodeBindings::IsInitialized() {
 
 // Initialize Node.js cli options to pass to Node.js
 // See https://nodejs.org/api/cli.html#cli_options
-void NodeBindings::SetNodeCliFlags() {
+std::vector<std::string> NodeBindings::ParseNodeCliFlags() {
   const auto argv = base::CommandLine::ForCurrentProcess()->argv();
   std::vector<std::string> args;
 
@@ -395,9 +427,8 @@ void NodeBindings::SetNodeCliFlags() {
     const auto& option = arg;
 #endif
     const auto stripped = base::StringPiece(option).substr(0, option.find('='));
-
-    // Only allow in no-op (--) option or DebugOptions
-    if (IsAllowedDebugOption(stripped) || stripped == "--")
+    // Only allow no-op or a small set of debug/trace related options.
+    if (IsAllowedOption(stripped) || stripped == "--")
       args.push_back(option);
   }
 
@@ -408,16 +439,7 @@ void NodeBindings::SetNodeCliFlags() {
     args.push_back("--no-experimental-fetch");
   }
 
-  std::vector<std::string> errors;
-  const int exit_code = ProcessGlobalArgs(&args, nullptr, &errors,
-                                          node::kDisallowedInEnvironment);
-
-  const std::string err_str = "Error parsing Node.js cli flags ";
-  if (exit_code != 0) {
-    LOG(ERROR) << err_str;
-  } else if (!errors.empty()) {
-    LOG(ERROR) << err_str << base::JoinString(errors, " ");
-  }
+  return args;
 }
 
 void NodeBindings::Initialize(v8::Local<v8::Context> context) {
@@ -433,13 +455,11 @@ void NodeBindings::Initialize(v8::Local<v8::Context> context) {
   // Explicitly register electron's builtin bindings.
   RegisterBuiltinBindings();
 
-  // Parse and set Node.js cli flags.
-  SetNodeCliFlags();
-
   auto env = base::Environment::Create();
   SetNodeOptions(env.get());
 
-  std::vector<std::string> argv = {"electron"};
+  // Parse and set Node.js cli flags.
+  std::vector<std::string> argv = ParseNodeCliFlags();
   std::vector<std::string> exec_argv;
   std::vector<std::string> errors;
   uint64_t process_flags = node::ProcessFlags::kNoFlags;
@@ -473,7 +493,7 @@ void NodeBindings::Initialize(v8::Local<v8::Context> context) {
   g_is_initialized = true;
 }
 
-node::Environment* NodeBindings::CreateEnvironment(
+std::shared_ptr<node::Environment> NodeBindings::CreateEnvironment(
     v8::Handle<v8::Context> context,
     node::MultiIsolatePlatform* platform,
     std::vector<std::string> args,
@@ -511,15 +531,22 @@ node::Environment* NodeBindings::CreateEnvironment(
                          electron::fuses::IsOnlyLoadAppFromAsarEnabled()
                              ? app_asar_search_paths
                              : search_paths));
+    context->Global()->SetPrivate(
+        context,
+        v8::Private::ForApi(
+            isolate, gin::ConvertToV8(isolate, "appSearchPathsOnlyLoadASAR")
+                         .As<v8::String>()),
+        gin::ConvertToV8(isolate,
+                         electron::fuses::IsOnlyLoadAppFromAsarEnabled()));
   }
 
-  base::FilePath resources_path = GetResourcesPath();
   std::string init_script = "electron/js2c/" + process_type + "_init";
 
   args.insert(args.begin() + 1, init_script);
 
-  if (!isolate_data_)
-    isolate_data_ = node::CreateIsolateData(isolate, uv_loop_, platform);
+  auto* isolate_data = node::CreateIsolateData(isolate, uv_loop_, platform);
+  context->SetAlignedPointerInEmbedderData(kElectronContextEmbedderDataIndex,
+                                           static_cast<void*>(isolate_data));
 
   node::Environment* env;
   uint64_t flags = node::EnvironmentFlags::kDefaultFlags |
@@ -550,8 +577,9 @@ node::Environment* NodeBindings::CreateEnvironment(
   {
     v8::TryCatch try_catch(isolate);
     env = node::CreateEnvironment(
-        isolate_data_, context, args, exec_args,
-        static_cast<node::EnvironmentFlags::Flags>(flags));
+        static_cast<node::IsolateData*>(isolate_data), context, args, exec_args,
+        static_cast<node::EnvironmentFlags::Flags>(flags), {}, {},
+        &OnNodePreload);
 
     if (try_catch.HasCaught()) {
       std::string err_msg =
@@ -633,16 +661,26 @@ node::Environment* NodeBindings::CreateEnvironment(
 
   gin_helper::Dictionary process(context->GetIsolate(), env->process_object());
   process.SetReadOnly("type", process_type);
-  process.Set("resourcesPath", resources_path);
-  // The path to helper app.
-  base::FilePath helper_exec_path;
-  base::PathService::Get(content::CHILD_PROCESS_EXE, &helper_exec_path);
-  process.Set("helperExecPath", helper_exec_path);
 
-  return env;
+  auto env_deleter = [isolate, isolate_data,
+                      context = v8::Global<v8::Context>{isolate, context}](
+                         node::Environment* nenv) mutable {
+    // When `isolate_data` was created above, a pointer to it was kept
+    // in context's embedder_data[kElectronContextEmbedderDataIndex].
+    // Since we're about to free `isolate_data`, clear that entry
+    v8::HandleScope handle_scope{isolate};
+    context.Get(isolate)->SetAlignedPointerInEmbedderData(
+        kElectronContextEmbedderDataIndex, nullptr);
+    context.Reset();
+
+    node::FreeEnvironment(nenv);
+    node::FreeIsolateData(isolate_data);
+  };
+
+  return {env, std::move(env_deleter)};
 }
 
-node::Environment* NodeBindings::CreateEnvironment(
+std::shared_ptr<node::Environment> NodeBindings::CreateEnvironment(
     v8::Handle<v8::Context> context,
     node::MultiIsolatePlatform* platform) {
 #if BUILDFLAG(IS_WIN)
@@ -769,6 +807,35 @@ void NodeBindings::EmbedThreadRunner(void* arg) {
     // Deal with event in main thread.
     self->WakeupMainThread();
   }
+}
+
+void OnNodePreload(node::Environment* env,
+                   v8::Local<v8::Value> process,
+                   v8::Local<v8::Value> require) {
+  // Set custom process properties.
+  gin_helper::Dictionary dict(env->isolate(), process.As<v8::Object>());
+  dict.SetReadOnly("resourcesPath", GetResourcesPath());
+  base::FilePath helper_exec_path;  // path to the helper app.
+  base::PathService::Get(content::CHILD_PROCESS_EXE, &helper_exec_path);
+  dict.SetReadOnly("helperExecPath", helper_exec_path);
+  gin_helper::Dictionary versions;
+  if (dict.Get("versions", &versions)) {
+    versions.SetReadOnly(ELECTRON_PROJECT_NAME, ELECTRON_VERSION_STRING);
+    versions.SetReadOnly("chrome", CHROME_VERSION_STRING);
+#if BUILDFLAG(HAS_VENDOR_VERSION)
+    versions.SetReadOnly(BUILDFLAG(VENDOR_VERSION_NAME),
+                         BUILDFLAG(VENDOR_VERSION_VALUE));
+#endif
+  }
+
+  // Execute lib/node/init.ts.
+  std::vector<v8::Local<v8::String>> bundle_params = {
+      node::FIXED_ONE_BYTE_STRING(env->isolate(), "process"),
+      node::FIXED_ONE_BYTE_STRING(env->isolate(), "require"),
+  };
+  std::vector<v8::Local<v8::Value>> bundle_args = {process, require};
+  electron::util::CompileAndCall(env->context(), "electron/js2c/node_init",
+                                 &bundle_params, &bundle_args, env);
 }
 
 }  // namespace electron

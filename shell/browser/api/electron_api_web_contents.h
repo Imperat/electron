@@ -134,6 +134,7 @@ class WebContents : public ExclusiveAccessContext,
   // if there is no associated wrapper.
   static WebContents* From(content::WebContents* web_contents);
   static WebContents* FromID(int32_t id);
+  static std::list<WebContents*> GetWebContentsList();
 
   // Get the V8 wrapper of the |web_contents|, or create one if not existed.
   //
@@ -147,9 +148,12 @@ class WebContents : public ExclusiveAccessContext,
       v8::Isolate* isolate,
       const gin_helper::Dictionary& web_preferences);
 
+  // gin_helper::Constructible
+  static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
+  static const char* GetClassName() { return "WebContents"; }
+
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
-  static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
   const char* GetTypeName() override;
 
   void Destroy();
@@ -165,7 +169,7 @@ class WebContents : public ExclusiveAccessContext,
   void LoadURL(const GURL& url, const gin_helper::Dictionary& options);
   void Reload();
   void ReloadIgnoringCache();
-  void DownloadURL(const GURL& url);
+  void DownloadURL(const GURL& url, gin::Arguments* args);
   GURL GetURL() const;
   std::u16string GetTitle() const;
   bool IsLoading() const;
@@ -197,6 +201,8 @@ class WebContents : public ExclusiveAccessContext,
   void CloseDevTools();
   bool IsDevToolsOpened();
   bool IsDevToolsFocused();
+  std::u16string GetDevToolsTitle();
+  void SetDevToolsTitle(const std::u16string& title);
   void ToggleDevTools();
   void EnableDeviceEmulation(const blink::DeviceEmulationParams& params);
   void DisableDeviceEmulation();
@@ -428,7 +434,8 @@ class WebContents : public ExclusiveAccessContext,
       content::RenderFrameHost* render_frame_host);
   void MessageTo(int32_t web_contents_id,
                  const std::string& channel,
-                 blink::CloneableMessage arguments);
+                 blink::CloneableMessage arguments,
+                 content::RenderFrameHost* render_frame_host);
   void MessageHost(const std::string& channel,
                    blink::CloneableMessage arguments,
                    content::RenderFrameHost* render_frame_host);
@@ -561,14 +568,17 @@ class WebContents : public ExclusiveAccessContext,
                  const gfx::Rect& selection_rect,
                  int active_match_ordinal,
                  bool final_update) override;
-  void RequestExclusivePointerAccess(content::WebContents* web_contents,
-                                     bool user_gesture,
-                                     bool last_unlocked_by_target,
-                                     bool allowed);
+  void OnRequestToLockMouse(content::WebContents* web_contents,
+                            bool user_gesture,
+                            bool last_unlocked_by_target,
+                            bool allowed);
   void RequestToLockMouse(content::WebContents* web_contents,
                           bool user_gesture,
                           bool last_unlocked_by_target) override;
   void LostMouseLock() override;
+  void OnRequestKeyboardLock(content::WebContents* web_contents,
+                             bool esc_key_locked,
+                             bool allowed);
   void RequestKeyboardLock(content::WebContents* web_contents,
                            bool esc_key_locked) override;
   void CancelKeyboardLockRequest(content::WebContents* web_contents) override;

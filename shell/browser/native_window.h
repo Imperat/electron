@@ -17,11 +17,11 @@
 #include "base/supports_user_data.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "electron/shell/common/api/api.mojom.h"
 #include "extensions/browser/app_window/size_constraints.h"
 #include "shell/browser/draggable_region_provider.h"
 #include "shell/browser/native_window_observer.h"
 #include "shell/browser/ui/inspectable_web_contents_view.h"
-#include "shell/common/api/api.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -149,6 +149,7 @@ class NativeWindow : public base::SupportsUserData,
   virtual std::string GetAlwaysOnTopLevel() = 0;
   virtual void SetActive(bool is_key) = 0;
   virtual bool IsActive() const = 0;
+  virtual void RemoveChildFromParentWindow() = 0;
   virtual void RemoveChildWindow(NativeWindow* child) = 0;
   virtual void AttachChildren() = 0;
   virtual void DetachChildren() = 0;
@@ -217,8 +218,12 @@ class NativeWindow : public base::SupportsUserData,
   virtual void SetAutoHideCursor(bool auto_hide);
 
   // Vibrancy API
+  const std::string& vibrancy() const { return vibrancy_; }
   virtual void SetVibrancy(const std::string& type);
 
+  const std::string& background_material() const {
+    return background_material_;
+  }
   virtual void SetBackgroundMaterial(const std::string& type);
 
   // Traffic Light API
@@ -245,10 +250,12 @@ class NativeWindow : public base::SupportsUserData,
   // Native Tab API
   virtual void SelectPreviousTab();
   virtual void SelectNextTab();
+  virtual void ShowAllTabs();
   virtual void MergeAllWindows();
   virtual void MoveTabToNewWindow();
   virtual void ToggleTabBar();
   virtual bool AddTabbedWindow(NativeWindow* window);
+  virtual absl::optional<std::string> GetTabbingIdentifier() const;
 
   // Toggle the menu bar.
   virtual void SetAutoHideMenuBar(bool auto_hide);
@@ -278,7 +285,7 @@ class NativeWindow : public base::SupportsUserData,
     return weak_factory_.GetWeakPtr();
   }
 
-  virtual gfx::Rect GetWindowControlsOverlayRect();
+  virtual absl::optional<gfx::Rect> GetWindowControlsOverlayRect();
   virtual void SetWindowControlsOverlayRect(const gfx::Rect& overlay_rect);
 
   // Methods called by the WebContents.
@@ -393,6 +400,8 @@ class NativeWindow : public base::SupportsUserData,
   void AddDraggableRegionProvider(DraggableRegionProvider* provider);
   void RemoveDraggableRegionProvider(DraggableRegionProvider* provider);
 
+  bool IsTranslucent() const;
+
  protected:
   friend class api::BrowserView;
 
@@ -423,6 +432,13 @@ class NativeWindow : public base::SupportsUserData,
   // The "titleBarStyle" option.
   TitleBarStyle title_bar_style_ = TitleBarStyle::kNormal;
 
+  // Minimum and maximum size.
+  absl::optional<extensions::SizeConstraints> size_constraints_;
+  // Same as above but stored as content size, we are storing 2 types of size
+  // constraints beacause converting between them will cause rounding errors
+  // on HiDPI displays on some environments.
+  absl::optional<extensions::SizeConstraints> content_size_constraints_;
+
   std::queue<bool> pending_transitions_;
   FullScreenTransitionState fullscreen_transition_state_ =
       FullScreenTransitionState::kNone;
@@ -449,9 +465,6 @@ class NativeWindow : public base::SupportsUserData,
 
   // Whether window is transparent.
   bool transparent_ = false;
-
-  // Minimum and maximum size, stored as content size.
-  extensions::SizeConstraints size_constraints_;
 
   // Whether window can be resized larger than screen.
   bool enable_larger_than_screen_ = false;
@@ -485,6 +498,9 @@ class NativeWindow : public base::SupportsUserData,
 
   // Accessible title.
   std::u16string accessible_title_;
+
+  std::string vibrancy_;
+  std::string background_material_;
 
   gfx::Rect overlay_rect_;
 
